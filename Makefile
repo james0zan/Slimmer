@@ -1,4 +1,4 @@
-##===- projects/sample/Makefile ----------------------------*- Makefile -*-===##
+##===- Slimmer/Makefile ----------------------------*- Makefile -*-===##
 #
 # This is a sample Makefile for a project that uses LLVM.
 #

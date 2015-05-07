@@ -1,4 +1,4 @@
-#===- tools/gold/Makefile ----------------------------------*- Makefile -*-===##
+#===- Slimmer/tools/SlimmerGold/Makefile ----------------------------------*- Makefile -*-===##
 # 
 #                     The LLVM Compiler Infrastructure
 #

@@ -21529,7 +21529,7 @@ ac_config_commands="$ac_config_commands lib/SlimmerTrace/Makefile"
 ac_config_commands="$ac_config_commands tools/Makefile"
 
 
-ac_config_commands="$ac_config_commands lib/SlimmerGold/Makefile"
+ac_config_commands="$ac_config_commands tools/SlimmerGold/Makefile"
 
 
 
@@ -22118,7 +22118,7 @@ do
     "lib/Makefile") CONFIG_COMMANDS="$CONFIG_COMMANDS lib/Makefile" ;;
     "lib/SlimmerTrace/Makefile") CONFIG_COMMANDS="$CONFIG_COMMANDS lib/SlimmerTrace/Makefile" ;;
     "tools/Makefile") CONFIG_COMMANDS="$CONFIG_COMMANDS tools/Makefile" ;;
-    "lib/SlimmerGold/Makefile") CONFIG_COMMANDS="$CONFIG_COMMANDS lib/SlimmerGold/Makefile" ;;
+    "tools/SlimmerGold/Makefile") CONFIG_COMMANDS="$CONFIG_COMMANDS tools/SlimmerGold/Makefile" ;;
 
   *) { { echo "$as_me:$LINENO: error: invalid argument: $ac_config_target" >&5
 echo "$as_me: error: invalid argument: $ac_config_target" >&2;}
@@ -22726,8 +22726,8 @@ echo "$as_me: executing $ac_file commands" >&6;}
    ${SHELL} ${llvm_src}/autoconf/install-sh -m 0644 -c ${srcdir}/lib/SlimmerTrace/Makefile lib/SlimmerTrace/Makefile ;;
     "tools/Makefile":C) ${llvm_src}/autoconf/mkinstalldirs `dirname tools/Makefile`
    ${SHELL} ${llvm_src}/autoconf/install-sh -m 0644 -c ${srcdir}/tools/Makefile tools/Makefile ;;
-    "lib/SlimmerGold/Makefile":C) ${llvm_src}/autoconf/mkinstalldirs `dirname lib/SlimmerGold/Makefile`
-   ${SHELL} ${llvm_src}/autoconf/install-sh -m 0644 -c ${srcdir}/lib/SlimmerGold/Makefile lib/SlimmerGold/Makefile ;;
+    "tools/SlimmerGold/Makefile":C) ${llvm_src}/autoconf/mkinstalldirs `dirname tools/SlimmerGold/Makefile`
+   ${SHELL} ${llvm_src}/autoconf/install-sh -m 0644 -c ${srcdir}/tools/SlimmerGold/Makefile tools/SlimmerGold/Makefile ;;
 
   esac
 done # for ac_tag

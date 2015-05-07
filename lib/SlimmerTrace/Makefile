@@ -1,4 +1,4 @@
-##===- projects/sample/lib/sample/Makefile -----------------*- Makefile -*-===##
+##===- Slimmer/lib/SlimmerTrace/Makefile -----------------*- Makefile -*-===##
 
 #
 # Indicate where we are relative to the top of the source tree.

@@ -1,4 +1,4 @@
-##===- lib/LTO/Makefile ------------------------------------*- Makefile -*-===##
+##===- Slimmer/lib/SlimmerLTO/Makefile ------------------------------------*- Makefile -*-===##
 #
 #                     The LLVM Compiler Infrastructure
 #
