@@ -28,5 +28,5 @@ CXXFLAGS += -I$(BINUTILS_INCDIR) -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64
 # LDFLAGS += -L$(SharedLibDir)/$(SharedPrefix)
 
 include $(LEVEL)/Makefile.common
+# LIBS += -lglog
 
-# LIBS += -lLTO
