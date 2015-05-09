@@ -8,6 +8,6 @@ LEVEL=..
 #
 # List all of the subdirectories that we will compile.
 #
-DIRS=SlimmerTrace SlimmerLTO
+DIRS = SlimmerUtil SlimmerTrace SlimmerRuntime SlimmerLTO
 
 include $(LEVEL)/Makefile.common

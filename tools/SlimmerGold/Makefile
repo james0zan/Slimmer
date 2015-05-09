@@ -13,7 +13,7 @@ LINK_COMPONENTS := support all-targets ipo scalaropts linker bitreader bitwriter
 LINK_LIBS_IN_SHARED := 1
 SHARED_LIBRARY := 1
 LOADABLE_MODULE := 1
-USEDLIBS = SlimmerLTO.a SlimmerTrace.a
+USEDLIBS = SlimmerLTO.a SlimmerTrace.a SlimmerUtil.a
 
 EXPORTED_SYMBOL_FILE = $(PROJ_SRC_DIR)/gold.exports
 

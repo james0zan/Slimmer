@@ -18,3 +18,16 @@ GNU gold (GNU Binutils 2.25.51.20150507) 1.11
     CC=$LLVM_BIN/clang CXX=$LLVM_BIN/clang++ ../configure --with-llvmsrc=$LLVM_SRC --with-llvmobj=$LLVM_OBJ --with-binutils-include=$BINUTILS_INCLUDE --enable-optimized=yes
 
     CC=$LLVM_BIN/clang CXX=$LLVM_BIN/clang++ CPPFLAGS="-I/usr/include/c++/4.8/ -I/usr/include/x86_64-linux-gnu/c++/4.8/" CXXFLAGS="-std=c++11" VERBOSE=1 make
+
+# File Format
+
+## Inst
+
+The ``Inst" file maps an instruction ID to the corresponding information,
+in which each line is:
+
+    InstructionID:
+        BasicBlockID,
+        Path to the code file (in base64) or [UNKNOWN] if not available,
+        Line of code or -1 if not available,
+        The instruction's LLVM IR (in base64)
