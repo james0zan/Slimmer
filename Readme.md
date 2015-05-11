@@ -62,14 +62,42 @@ in which each line is:
 
     InstructionID:
         BasicBlockID,
-        Path to the code file (in base64) or [UNKNOWN] if not available,
+        Type = {NormalInst, MemoryInst, CallInst, TerminatorInst, PhiNode, VarArg},
+        [SSA dependency 1, SSA dependency 2, ...],
+        {
+            For MemoryInst: {
+                For load instruction: 0,
+                For store instruction: 1
+            },
+            For CallInst: {
+                The called function name or [UNKNOWN] if not available
+            },
+            For TerminatorInst: {
+                [BasicBlockID of successor 1, BasicBlockID of successor 2, ...]
+            },
+            For PhiNode: {
+                [<Income BasicBlockID 1, Income value>, <Income BasicBlockID 2, Income value>, ...]
+            },
+        }
         Line of code or -1 if not available,
+        Path to the code file (in base64) or [UNKNOWN] if not available,
         The instruction's LLVM IR (in base64)
 
-## VarArg
+A data dependency (i.e., a SSA dependency or a income value for the PhiNode) is represented as:
 
-## CallInst
+    <
+        Type = {Inst, Arg, Constant},
+        ID: {
+            For Inst: the InstructionID,
+            For Arg: which argument it uses,
+            For Constant: 0
+        }
+    >
 
-## PhiNode
+As for the intrinsic functions of LLVM, they are interpreted as several instructions.
+Specifically, 
 
-## TerminatorInst
+1. "llvm.memset." is interpreted as a store instruction;
+2. both "llvm.memcpy." and "llvm.memmove." are interpreted as a load instruction **and** a store instruction.
+3. "llvm.va_start" and "llvm.va_end" are interpreted as a normal instruction with type "VarArg". They are used for linking the use of a variable-number argument to the argument's definition.
+
