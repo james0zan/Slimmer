@@ -31,13 +31,9 @@ using namespace std;
 //                           Forward declearation
 //===----------------------------------------------------------------------===//
 extern "C" void recordInit(const char *name);
-// extern "C" void recordLock();
-// extern "C" void recordUnlock();
-// extern "C" void recordBBStart(unsigned id);
-// extern "C" void recordLoad(unsigned id, void *p, uint64_t length);
-// extern "C" void recordStore(unsigned id, void *p, uint64_t length);
-// extern "C" void recordCall(unsigned id, void *fp);
-// extern "C" void recordReturn(unsigned id, void *fp, uint64_t ret);
+extern "C" void recordAddLock();
+extern "C" void recordBasicBlockEvent(unsigned id);
+extern "C" void recordMemoryEvent(unsigned id, void *p, uint64_t length);
 
 //===----------------------------------------------------------------------===//
 //                       Record and Helper Functions
@@ -46,3 +42,16 @@ extern "C" void recordInit(const char *name);
 void recordInit(const char *name) {
   DEBUG("Trace file: %s\n", name);
 }
+
+void recordAddLock() {
+  DEBUG("Lock the trace file\n");
+}
+
+void recordBasicBlockEvent(unsigned id) {
+  DEBUG("BasicBlockEvent: %u\n", id);
+}
+
+void recordMemoryEvent(unsigned id, void *p, uint64_t length) {
+  DEBUG("MemoryEvent: %u %p %llu\n", id, p, length);
+}
+

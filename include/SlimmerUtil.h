@@ -56,7 +56,24 @@ std::string base64_decode(std::string const& s);
 //                           LLVM Helpers
 //===----------------------------------------------------------------------===//
 namespace llvm {
+/// make_vector - Helper function which is useful for building temporary vectors
+/// to pass into type construction of CallInst ctors.  This turns a null
+/// terminated list of pointers (or other value types) into a real live vector.
+///
+template<typename T>
+inline std::vector<T> make_vector(T A, ...) {
+  va_list Args;
+  va_start(Args, A);
+  std::vector<T> Result;
+  Result.push_back(A);
+  while (T Val = va_arg(Args, T))
+    Result.push_back(Val);
+  va_end(Args);
+  return Result;
+}
+
 GlobalVariable *StringToGV(const std::string& s, Module& module);
+Value *LLVMCastTo(Value *V, Type *Ty, Twine Name, Instruction *InsertPt);
 
 /// Determines whether the function is a call to a function in one of the
 /// Slimmer run-time libraries.

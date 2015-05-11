@@ -62,26 +62,23 @@ in which each line is:
 
     InstructionID:
         BasicBlockID,
-        Type = {NormalInst, MemoryInst, CallInst, TerminatorInst, PhiNode, VarArg},
-        [SSA dependency 1, SSA dependency 2, ...],
-        {
-            For MemoryInst: {
-                For load instruction: 0,
-                For store instruction: 1
-            },
-            For CallInst: {
-                The called function name or [UNKNOWN] if not available
-            },
-            For TerminatorInst: {
-                [BasicBlockID of successor 1, BasicBlockID of successor 2, ...]
-            },
-            For PhiNode: {
-                [<Income BasicBlockID 1, Income value>, <Income BasicBlockID 2, Income value>, ...]
-            },
-        }
         Line of code or -1 if not available,
         Path to the code file (in base64) or [UNKNOWN] if not available,
-        The instruction's LLVM IR (in base64)
+        The instruction's LLVM IR (in base64),
+        [SSA dependency 1, SSA dependency 2, ..., ],
+        Type = {NormalInst, LoadInst, StoreInst, CallInst, TerminatorInst, PhiNode, VarArg},
+        {
+            For CallInst: {
+                The called function name or [UNKNOWN] if not available,
+            },
+            For TerminatorInst: {
+                [BasicBlockID of successor 1, BasicBlockID of successor 2, ..., ]
+            },
+            For PhiNode: {
+                [<Income BasicBlockID 1, Income value>, <Income BasicBlockID 2, Income value>, ..., ]
+            },
+        },
+        
 
 A data dependency (i.e., a SSA dependency or a income value for the PhiNode) is represented as:
 

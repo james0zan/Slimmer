@@ -57,17 +57,20 @@ namespace {
 
     // Get a printable representation of the Value V
     std::string value2String(Value *v);
-    // Return the info string of an instruction.
-    std::string ins2InfoString(Instruction *ins);
+    // Return the common information of an instruction.
+    std::string CommonInfo(Instruction *ins);
 
     // The instrumentation functions
+    void instrumentAddLock(Instruction *ins_ptr);
+    void instrumentBasicBlock(BasicBlock *bb);
     void instrumentLoadInst(LoadInst *load_ins);
-    // TODO
+    void instrumentStoreInst(StoreInst *store_ptr);
 
     // Functions for recording events during execution
     Function *recordInit;
-    // Function *recordLoad;
-    // TODO
+    Function *recordAddLock;
+    Function *recordBasicBlockEvent;
+    Function *recordMemoryEvent;
 
     // Integer types
     Type *Int8Type;
@@ -89,31 +92,46 @@ std::string SlimmerTrace::value2String(Value *v) {
   return s;
 }
 
-std::string SlimmerTrace::ins2InfoString(Instruction *ins) {
+std::string SlimmerTrace::CommonInfo(Instruction *ins) {
   std::string s;
   raw_string_ostream rso(s);
   
   // InstructionID:
   assert(ins2ID.count(ins) > 0);
-  rso << ins2ID[ins] << ": ";
+  rso << ins2ID[ins] << ":\n";
 
   // BasicBlockID,
   assert(bb2ID.count(ins->getParent()) > 0);
-  rso << bb2ID[ins->getParent()] << ", ";
+  rso << "\t" << bb2ID[ins->getParent()] << ",\n";
 
-  // Path to the code file, Line of code,
+  // Line of code, Path to the code file, 
   if (MDNode *dbg = ins->getMetadata("dbg")) {
     DILocation loc(dbg);
+    rso << "\t" << loc.getLineNumber() << ",\n";
     std::string path = loc.getDirectory().str() + "/" + loc.getFilename().str();
-    rso << base64_encode((unsigned char const*)path.c_str(), path.length()) << ", ";
-    rso << loc.getLineNumber() << ", ";
+    rso << "\t" << base64_encode((unsigned char const*)path.c_str(), path.length()) << ",\n";
   } else {
-    rso << "[UNKNOWN], -1, ";
+    rso << "\t-1,\n\t[UNKNOWN],\n";
   }
 
   // The instruction's LLVM IR
   std::string ins_string = value2String(ins);
-  rso << base64_encode((unsigned char const*)ins_string.c_str(), ins_string.length());
+  rso << "\t" << ins_string << ",\n"; // TODO: remove this line
+  rso << "\t" << base64_encode((unsigned char const*)ins_string.c_str(), ins_string.length()) << ",\n";
+  
+  // SSA dependencies
+  rso << "\t[";
+  for (unsigned index = 0; index < ins->getNumOperands(); ++index) {
+    if (Instruction *tmp = dyn_cast<Instruction>(ins->getOperand(index))) {
+      assert(ins2ID.count(tmp) > 0);
+      rso << "<Inst, " << ins2ID[tmp] << ">, ";
+    } else if (Argument *arg= dyn_cast<Argument>(ins->getOperand(index))) {
+      rso << "<Arg, " << arg->getArgNo() << ">, ";
+    } else { // A constant
+      rso << "<Constant, 0>, ";
+    }
+  }
+  rso << "],\n";
   return s;
 }
 
@@ -137,52 +155,20 @@ bool SlimmerTrace::doInitialization(Module& module)  {
     module.getOrInsertFunction("recordInit",
       VoidType, VoidPtrType, nullptr));
 
-  // // Lock the trace file
-  // RecordLock = cast<Function>(module.getOrInsertFunction("recordLock",
-  //                                                   VoidType,
-  //                                                   nullptr));
+  // Lock the trace file
+  recordAddLock = cast<Function>(
+    module.getOrInsertFunction("recordAddLock",
+      VoidType, nullptr));
 
-  // // Unlock the trace file
-  // RecordUnlock = cast<Function>(module.getOrInsertFunction("recordUnlock",
-  //                                                     VoidType,
-  //                                                     nullptr));
+  // Recording a BasicBlockEvent.
+  recordBasicBlockEvent = cast<Function>(
+    module.getOrInsertFunction("recordBasicBlockEvent",
+      VoidType, Int32Type, nullptr));
 
-  // // Recording the start of a basic block in a critical section.
-  // RecordBBStart = cast<Function>(module.getOrInsertFunction("recordBBStart",
-  //                                                      VoidType,
-  //                                                      Int32Type,
-  //                                                      nullptr));
-
-  // Recording the loads then unlock the trace file
-  // RecordLoad = cast<Function>(module.getOrInsertFunction("recordLoad",
-  //                                                   VoidType,
-  //                                                   Int32Type,
-  //                                                   VoidPtrType,
-  //                                                   Int64Type,
-  //                                                   nullptr));
-
-  // // Recording the store then unlock the trace file
-  // RecordStore = cast<Function>(module.getOrInsertFunction("recordStore",
-  //                                                    VoidType,
-  //                                                    Int32Type,
-  //                                                    VoidPtrType,
-  //                                                    Int64Type,
-  //                                                    nullptr));
-
-  // // Recording the start of a function in a critical section.
-  // RecordCall = cast<Function>(module.getOrInsertFunction("recordCall",
-  //                                                   VoidType,
-  //                                                   Int32Type,
-  //                                                   VoidPtrType,
-  //                                                   nullptr));
-
-  // // Recording the end of a function in a critical section.
-  // RecordReturn = cast<Function>(module.getOrInsertFunction("recordReturn",
-  //                                                     VoidType,
-  //                                                     Int32Type,
-  //                                                     VoidPtrType,
-  //                                                     Int64Type,
-  //                                                     nullptr));
+  // Recording a MemoryEvent
+  recordMemoryEvent = cast<Function>(
+    module.getOrInsertFunction("recordMemoryEvent",
+      VoidType, Int32Type, VoidPtrType, Int64Type, nullptr));
 
   // Create the constructor
   appendCtor(module);
@@ -219,29 +205,130 @@ bool SlimmerTrace::runOnModule(Module& module) {
 
   // The basic block (instruction) ID is started from 0
   uint32_t bb_id = 0, ins_id = 0;
+  std::vector<Instruction *> ins_list;
   for (Module::iterator fun_ptr = module.begin(), fun_end = module.end(); fun_ptr != fun_end; ++fun_ptr) {
     if (fun_ptr->isDeclaration() || IsSlimmerFunction(fun_ptr)) continue;
     LOG(INFO, "SlimmerTrace::FunctionName") << fun_ptr->stripPointerCasts()->getName().str();
-    
     for (Function::iterator bb_ptr = fun_ptr->begin(), bb_end = fun_ptr->end(); bb_ptr != bb_end; ++bb_ptr) {
       bb2ID[bb_ptr] = bb_id++;
       for (BasicBlock::iterator ins_ptr = bb_ptr->begin(), ins_end = bb_ptr->end(); ins_ptr != ins_end; ++ins_ptr) {
         ins2ID[ins_ptr] = ins_id++;
-        fInst << ins2InfoString(ins_ptr) << "\n";
-
-        if (isa<LoadInst>(ins_ptr))
-          instrumentLoadInst(cast<LoadInst>(ins_ptr));
+        ins_list.push_back(ins_ptr);
       }
+      instrumentBasicBlock(bb_ptr);
+    }
+  }
+
+  for (auto &ins_ptr: ins_list) {
+    fInst << CommonInfo(ins_ptr);
+    if (LoadInst *load_ptr = dyn_cast<LoadInst>(ins_ptr)) {
+      fInst << "\tLoadInst,\n";
+      instrumentLoadInst(load_ptr);
+    } else if (StoreInst *store_ptr = dyn_cast<StoreInst>(ins_ptr)) {
+      fInst << "\tStoreInst,\n";
+      instrumentStoreInst(store_ptr);
+    } else if (TerminatorInst *terminator_ptr = dyn_cast<TerminatorInst>(ins_ptr)) {
+      fInst << "\tTerminatorInst,\n\t[";
+          
+      // BasicBlockID of successor 1, BasicBlockID of successor 2, ...,
+      for (unsigned index = 0; index < terminator_ptr->getNumSuccessors(); ++index) {
+        BasicBlock *succ = terminator_ptr->getSuccessor(index);
+        assert(bb2ID.count(succ) > 0);
+        fInst << bb2ID[succ] << ", ";
+      }
+
+      fInst << "],\n";
+    } else if (PHINode *phi_ptr = dyn_cast<PHINode>(ins_ptr)) {
+      fInst << "\tPhiNode,\n\t[";
+
+      // <Income BasicBlockID 1, Income value>, <Income BasicBlockID 2, Income value>, ...,
+      for (unsigned index = 0; index < phi_ptr->getNumIncomingValues(); ++index) {
+        BasicBlock *bb = phi_ptr->getIncomingBlock(index);
+        assert(bb2ID.count(bb) > 0);
+        fInst << "<" << bb2ID[bb] << ", ";
+
+        if (Instruction *tmp = dyn_cast<Instruction>(phi_ptr->getIncomingValue(index))) {
+          assert(ins2ID.count(tmp) > 0);
+          fInst << "<Inst, " << ins2ID[tmp] << "> >, ";
+        } else if (Argument *arg= dyn_cast<Argument>(phi_ptr->getIncomingValue(index))) {
+          fInst << "<Arg, " << arg->getArgNo() << "> >, ";
+        } else { // A constant
+          fInst << "<Constant, 0> >, ";
+        }
+      }
+
+      fInst << "],\n";
+    } else if (CallInst *call_ptr = dyn_cast<CallInst>(ins_ptr)) {
+      Function *called_fun = call_ptr->getCalledFunction();
+      if (!called_fun) {
+        fInst << "\tCallInst,\n\t[UNKNOWN],\n";
+      } else if (called_fun->isIntrinsic()) {
+        // TODO
+      } else {
+        std::string fun_name = called_fun->stripPointerCasts()->getName().str();
+        fInst << "\tCallInst,\n\t" << fun_name << ",\n";
+      }
+    } else if (InvokeInst *invoke_ptr = dyn_cast<InvokeInst>(ins_ptr)) {
+      Function *called_fun = invoke_ptr->getCalledFunction();
+      if (!called_fun) {
+        fInst << "\tCallInst,\n\t[UNKNOWN],\n";
+      } else {
+        std::string fun_name = called_fun->stripPointerCasts()->getName().str();
+        fInst << "\tCallInst,\n\t" << fun_name << ",\n";
+      }
+    } else { // Normal Instruction
+      fInst << "\tNormalInst,\n";
     }
   }
   LOG(DEBUG, "SlimmerTrace::runOnModule") << "End";
   return false; 
 }
 
-void SlimmerTrace::instrumentLoadInst(LoadInst *load_ins) {
-  // Get the size of the loaded data.
-  uint64_t size = dataLayout->getTypeStoreSize(load_ins->getType());
-
-  LOG(INFO, "SlimmerTrace::instrumentLoadInst") << value2String(load_ins);
-  LOG(INFO, "SlimmerTrace::instrumentLoadInst") << "Size: " << size;
+void SlimmerTrace::instrumentAddLock(Instruction *ins_ptr) {
+  CallInst::Create(recordAddLock)->insertBefore(ins_ptr);
 }
+
+void SlimmerTrace::instrumentBasicBlock(BasicBlock *bb) {
+  assert(bb2ID.count(bb) > 0);
+  Value *bb_ID = ConstantInt::get(Int32Type, bb2ID[bb]);
+  std::vector<Value *> args = make_vector<Value *>(bb_ID, 0);
+
+  // Insert a call to recordBasicBlockEvent at the beginning of the basic block
+  CallInst::Create(recordBasicBlockEvent, args, "", bb->getFirstInsertionPt());
+}
+
+void SlimmerTrace::instrumentLoadInst(LoadInst *load_ptr) {
+  instrumentAddLock(load_ptr);
+
+  // Get the ID of the load instruction.
+  assert(ins2ID.count(load_ptr) > 0);
+  Value *load_id = ConstantInt::get(Int32Type, ins2ID[load_ptr]);
+  // Cast the pointer into a void pointer type.
+  Value *addr = load_ptr->getPointerOperand();
+  addr = LLVMCastTo(addr, VoidPtrType, addr->getName(), load_ptr);
+  // Get the size of the loaded data.
+  uint64_t size = dataLayout->getTypeStoreSize(load_ptr->getType());
+  Value *load_size = ConstantInt::get(Int64Type, size);
+  
+  std::vector<Value *> args = make_vector<Value *>(load_id, addr, load_size, 0);
+  CallInst::Create(recordMemoryEvent, args)->insertAfter(load_ptr);
+}
+
+void SlimmerTrace::instrumentStoreInst(StoreInst *store_ptr) {
+  instrumentAddLock(store_ptr);
+
+  // Get the ID of the load instruction.
+  assert(ins2ID.count(store_ptr) > 0);
+  Value *store_id = ConstantInt::get(Int32Type, ins2ID[store_ptr]);
+  // Cast the pointer into a void pointer type.
+  Value *addr = store_ptr->getPointerOperand();
+  addr = LLVMCastTo(addr, VoidPtrType, addr->getName(), store_ptr);
+  // Get the size of the loaded data.
+  uint64_t size = dataLayout->getTypeStoreSize(store_ptr->getOperand(0)->getType());
+  Value *store_size = ConstantInt::get(Int64Type, size);
+  
+  std::vector<Value *> args = make_vector<Value *>(store_id, addr, store_size, 0);
+  CallInst::Create(recordMemoryEvent, args)->insertAfter(store_ptr);
+}
+
+
