@@ -10,7 +10,7 @@ LEVEL=../..
 #
 LIBRARYNAME = SlimmerRuntime
 BUILD_ARCHIVE := 1
-
+LIBS += -lc -lpthread
 #
 # Include Makefile.common so we know what to do.
 #

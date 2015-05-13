@@ -1,57 +1,146 @@
-#include <cassert>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <errno.h>
-#include <fcntl.h>
-#include <pthread.h>
-#include <signal.h>
-#include <string.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/mman.h>
-#include <sys/syscall.h>
-#include <unistd.h>
-
-#include <stack>
-#include <unordered_map>
-
-using namespace std;
-
-#define DEBUG_SLIMMER_RUNTIME
-#ifdef DEBUG_SLIMMER_RUNTIME
-#define DEBUG(...) fprintf(stderr, __VA_ARGS__)
-#else
-#define DEBUG(...) do {} while (false)
-#endif
-
-#define ERROR(...) fprintf(stderr, __VA_ARGS__)
+#include "SlimmerRuntime.h"
 
 //===----------------------------------------------------------------------===//
-//                           Forward declearation
+//                        Trace Event Cache
 //===----------------------------------------------------------------------===//
-extern "C" void recordInit(const char *name);
-extern "C" void recordAddLock();
-extern "C" void recordBasicBlockEvent(unsigned id);
-extern "C" void recordMemoryEvent(unsigned id, void *p, uint64_t length);
+
+class EventCache {
+public:
+  void Init(const char *name);
+  void CloseCacheFile();
+  void Append(const char *event, size_t length);
+  ~EventCache() {
+    CloseCacheFile();
+  }
+  inline void Lock() {
+    pthread_spin_lock(&lock);
+  }
+  inline void Unlock() {
+    pthread_spin_unlock(&lock);
+  }
+
+private:
+  char *buffer;
+  int fd;
+  size_t offset;
+  size_t size; // Size of the event cache in bytes
+  // the mutex of modifying the EntryCache
+  pthread_spinlock_t lock;
+};
+
+void EventCache::Init(const char *name) {
+  long pages = sysconf(_SC_PHYS_PAGES);
+  long page_size = sysconf(_SC_PAGE_SIZE);
+  
+  size = ((uint64_t)(pages * LOAD_FACTOR)) * page_size;
+  
+  buffer = (char *)malloc(size);
+  assert(buffer && "Failed to malloc the event bufffer!\n");
+
+  fd = open(name, O_RDWR | O_CREAT | O_TRUNC, 0640u);
+  assert(fd != -1 && "Failed to open tracing file!\n");
+  DEBUG("[SLIMMER] Opened trace file: %s\n", name);
+
+  // Initialize all of the other fields.
+  offset = 0;
+
+  pthread_spin_init(&lock, 0);
+}
+
+void EventCache::CloseCacheFile() {
+  DEBUG("[SLIMMER] Writing cache data to trace file and closing.\n");
+  // Create an end event to terminate the log.
+  Append(&EndEventLabel, sizeof(EndEventLabel));
+
+  size_t cur = 0;
+  while (cur < offset) {
+    size_t tmp = write(fd, buffer + cur, offset - cur);
+    if (tmp > 0) cur += tmp;
+  }
+  close(fd);
+  pthread_spin_destroy(&lock);
+}
+
+void EventCache::Append(const char *event, size_t length) {
+  if (offset + length > size) {
+    size_t cur = 0;
+    while (cur < offset) {
+      size_t tmp = write(fd, buffer + cur, offset - cur);
+      if (tmp > 0) cur += tmp;
+    }
+    offset = 0;
+  }
+  assert(offset + length <= size);
+
+  memcpy(buffer + offset, event, length);
+  offset += length;
+}
 
 //===----------------------------------------------------------------------===//
 //                       Record and Helper Functions
 //===----------------------------------------------------------------------===//
 
+// This is the very event cache used by all record functions
+// Call EventCache.Init(...) before usage
+static EventCache event_cache;
+// The thread id
+static uint64_t __thread local_tid = 0;
+static char __thread basic_block_event[97] = {BasicBlockEventLabel};
+static char __thread memory_event[161 + size_of_ptr] = {MemoryEventLabel};
+
+// helper function which is registered at atexit()
+static void finish() {
+  // Make sure that we flush the entry/value cache on exit.
+  event_cache.CloseCacheFile();
+}
+
+// Signal handler to write only tracing data to file
+static void cleanup_only_tracing(int signum) {
+  DEBUG("[SLIMMER] Abnormal termination, signal number %d\n", signum);
+  exit(signum);
+}
+
 void recordInit(const char *name) {
-  DEBUG("Trace file: %s\n", name);
+  // Initialize the event cache by giving the path to the trace file.
+  event_cache.Init(name);
+
+  // Register the signal handlers for flushing the tracing data to file
+  // atexit(finish); // TODO: error: undefined reference to 'atexit'
+  signal(SIGINT, cleanup_only_tracing);
+  signal(SIGQUIT, cleanup_only_tracing);
+  signal(SIGSEGV, cleanup_only_tracing);
+  signal(SIGABRT, cleanup_only_tracing);
+  signal(SIGTERM, cleanup_only_tracing);
+  signal(SIGKILL, cleanup_only_tracing);
+  signal(SIGILL, cleanup_only_tracing);
+  signal(SIGFPE, cleanup_only_tracing);
 }
 
 void recordAddLock() {
-  DEBUG("Lock the trace file\n");
+  event_cache.Lock();
 }
 
-void recordBasicBlockEvent(unsigned id) {
-  DEBUG("BasicBlockEvent: %u\n", id);
+void recordBasicBlockEvent(uint32_t id) {
+  if (local_tid == 0) {
+    local_tid = syscall(SYS_gettid);
+    memcpy(&basic_block_event[1], &local_tid, 64);
+    memcpy(&memory_event[1], &local_tid, 64);
+  }
+  DEBUG("[SLIMMER] %s: id = %u\n", __func__, id);
+
+  memcpy(&basic_block_event[65], &id, 32);
+  event_cache.Lock();
+  event_cache.Append(basic_block_event, 97);
+  event_cache.Unlock();
 }
 
-void recordMemoryEvent(unsigned id, void *p, uint64_t length) {
-  DEBUG("MemoryEvent: %u %p %llu\n", id, p, length);
+void recordMemoryEvent(uint32_t id, void *p, uint64_t length) {
+  memcpy(&memory_event[65], &id, 32);
+  memcpy(&memory_event[97], &p, size_of_ptr);
+  memcpy(&memory_event[97 + size_of_ptr], &length, 64);
+  event_cache.Append(memory_event, 161 + size_of_ptr);
+  event_cache.Unlock();
+
+  DEBUG("[SLIMMER] %s: id = %u, len = %lu\n", __func__, id, length);  
 }
 
