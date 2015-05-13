@@ -49,6 +49,8 @@ namespace {
     
     // The output files
     std::fstream fInst;
+    std::fstream fInstrumentedFun;
+    std::set<std::string> instrumentedFun;
 
     // Map a basic block to its ID
     std::map<BasicBlock*, uint32_t> bb2ID;
@@ -65,12 +67,15 @@ namespace {
     void instrumentBasicBlock(BasicBlock *bb);
     void instrumentLoadInst(LoadInst *load_ins);
     void instrumentStoreInst(StoreInst *store_ptr);
+    void instrumentCallInst(CallInst *call_ptr);
 
     // Functions for recording events during execution
     Function *recordInit;
     Function *recordAddLock;
     Function *recordBasicBlockEvent;
     Function *recordMemoryEvent;
+    Function *recordCallEvent;
+    Function *recordReturnEvent;
 
     // Integer types
     Type *Int8Type;
@@ -142,6 +147,7 @@ bool SlimmerTrace::doInitialization(Module& module)  {
   LOG(DEBUG, "SlimmerTrace::InfoDir") << InfoDir;
   system(("mkdir -p " + InfoDir).c_str());
   fInst.open(InfoDir + "/Inst", std::fstream::out);
+  fInstrumentedFun.open(InfoDir + "/InstrumentedFun", std::fstream::out);
   
   // Get references to the different types that we'll need.
   Int8Type  = IntegerType::getInt8Ty(module.getContext());
@@ -169,6 +175,17 @@ bool SlimmerTrace::doInitialization(Module& module)  {
   recordMemoryEvent = cast<Function>(
     module.getOrInsertFunction("recordMemoryEvent",
       VoidType, Int32Type, VoidPtrType, Int64Type, nullptr));
+
+  // Recording the call to an uninstrumented function
+  recordCallEvent = cast<Function>(
+    module.getOrInsertFunction("recordCallEvent",
+      VoidType, Int32Type, VoidPtrType, nullptr));
+
+  // Recording the return of an uninstrumented function
+  recordReturnEvent = cast<Function>(
+    module.getOrInsertFunction("recordReturnEvent",
+      VoidType, Int32Type, VoidPtrType, nullptr));
+
 
   // Create the constructor
   appendCtor(module);
@@ -208,7 +225,9 @@ bool SlimmerTrace::runOnModule(Module& module) {
   std::vector<Instruction *> ins_list;
   for (Module::iterator fun_ptr = module.begin(), fun_end = module.end(); fun_ptr != fun_end; ++fun_ptr) {
     if (fun_ptr->isDeclaration() || IsSlimmerFunction(fun_ptr)) continue;
-    LOG(INFO, "SlimmerTrace::FunctionName") << fun_ptr->stripPointerCasts()->getName().str();
+    std::string fun_name = fun_ptr->stripPointerCasts()->getName().str();
+    instrumentedFun.insert(fun_name);
+    fInstrumentedFun << fun_name << "\n";
     for (Function::iterator bb_ptr = fun_ptr->begin(), bb_end = fun_ptr->end(); bb_ptr != bb_end; ++bb_ptr) {
       bb2ID[bb_ptr] = bb_id++;
       for (BasicBlock::iterator ins_ptr = bb_ptr->begin(), ins_end = bb_ptr->end(); ins_ptr != ins_end; ++ins_ptr) {
@@ -262,19 +281,27 @@ bool SlimmerTrace::runOnModule(Module& module) {
       Function *called_fun = call_ptr->getCalledFunction();
       if (!called_fun) {
         fInst << "\tCallInst,\n\t[UNKNOWN],\n";
+        // TODO
       } else if (called_fun->isIntrinsic()) {
         // TODO
       } else {
         std::string fun_name = called_fun->stripPointerCasts()->getName().str();
         fInst << "\tCallInst,\n\t" << fun_name << ",\n";
+        if (instrumentedFun.count(fun_name) == 0) {
+          instrumentCallInst(call_ptr);
+        }
       }
     } else if (InvokeInst *invoke_ptr = dyn_cast<InvokeInst>(ins_ptr)) {
       Function *called_fun = invoke_ptr->getCalledFunction();
       if (!called_fun) {
         fInst << "\tCallInst,\n\t[UNKNOWN],\n";
+        // TODO
       } else {
         std::string fun_name = called_fun->stripPointerCasts()->getName().str();
         fInst << "\tCallInst,\n\t" << fun_name << ",\n";
+        if (instrumentedFun.count(fun_name) == 0) {
+          // TODO
+        }
       }
     } else { // Normal Instruction
       fInst << "\tNormalInst,\n";
@@ -330,5 +357,18 @@ void SlimmerTrace::instrumentStoreInst(StoreInst *store_ptr) {
   std::vector<Value *> args = make_vector<Value *>(store_id, addr, store_size, 0);
   CallInst::Create(recordMemoryEvent, args)->insertAfter(store_ptr);
 }
+
+void SlimmerTrace::instrumentCallInst(CallInst *call_ptr) {
+  // Get the ID of the call instruction.
+  assert(ins2ID.count(call_ptr) > 0);
+  Value *call_id = ConstantInt::get(Int32Type, ins2ID[call_ptr]);
+  // Get the called function value and cast it to a void pointer.
+  Value *fun_ptr = LLVMCastTo(call_ptr->getCalledValue(), VoidPtrType, "", call_ptr);
+
+  std::vector<Value *> args = make_vector<Value *>(call_id, fun_ptr, 0);
+  CallInst::Create(recordCallEvent, args, "", call_ptr);  
+  CallInst::Create(recordReturnEvent, args)->insertAfter(call_ptr);
+}
+
 
 

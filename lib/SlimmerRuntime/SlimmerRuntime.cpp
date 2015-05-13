@@ -87,6 +87,8 @@ static EventCache event_cache;
 static uint64_t __thread local_tid = 0;
 static char __thread basic_block_event[97] = {BasicBlockEventLabel};
 static char __thread memory_event[161 + size_of_ptr] = {MemoryEventLabel};
+static char __thread call_event[97 + size_of_ptr] = {CallEventLabel};
+static char __thread return_event[97 + size_of_ptr] = {ReturnEventLabel};
 
 // helper function which is registered at atexit()
 static void finish() {
@@ -122,11 +124,14 @@ void recordAddLock() {
 
 void recordBasicBlockEvent(uint32_t id) {
   if (local_tid == 0) {
+    // The first event of a thread will always be a BasicBlockEvent
     local_tid = syscall(SYS_gettid);
     memcpy(&basic_block_event[1], &local_tid, 64);
     memcpy(&memory_event[1], &local_tid, 64);
+    memcpy(&call_event[1], &local_tid, 64);
+    memcpy(&return_event[1], &local_tid, 64);
   }
-  DEBUG("[SLIMMER] %s: id = %u\n", __func__, id);
+  DEBUG("[BasicBlockEvent] id = %u\n", id);
 
   memcpy(&basic_block_event[65], &id, 32);
   event_cache.Lock();
@@ -134,13 +139,32 @@ void recordBasicBlockEvent(uint32_t id) {
   event_cache.Unlock();
 }
 
-void recordMemoryEvent(uint32_t id, void *p, uint64_t length) {
+void recordMemoryEvent(uint32_t id, void *addr, uint64_t length) {
   memcpy(&memory_event[65], &id, 32);
-  memcpy(&memory_event[97], &p, size_of_ptr);
+  memcpy(&memory_event[97], &addr, size_of_ptr);
   memcpy(&memory_event[97 + size_of_ptr], &length, 64);
   event_cache.Append(memory_event, 161 + size_of_ptr);
   event_cache.Unlock();
 
-  DEBUG("[SLIMMER] %s: id = %u, len = %lu\n", __func__, id, length);  
+  DEBUG("[MemoryEvent] id = %u, addr = %p, len = %lu\n", id, addr, length);  
 }
 
+void recordCallEvent(uint32_t id, void *fun) {
+  DEBUG("[CallEvent] id = %u, fun = %p\n", id, fun);
+
+  memcpy(&call_event[65], &id, 32);
+  memcpy(&call_event[97], &fun, size_of_ptr);
+  event_cache.Lock();
+  event_cache.Append(call_event, 97 + size_of_ptr);
+  event_cache.Unlock();  
+}
+
+void recordReturnEvent(uint32_t id, void *fun) {
+  DEBUG("[ReturnEvent] id = %u, fun = %p\n", id, fun);
+
+  memcpy(&return_event[65], &id, 32);
+  memcpy(&return_event[97], &fun, size_of_ptr);
+  event_cache.Lock();
+  event_cache.Append(return_event, 97 + size_of_ptr);
+  event_cache.Unlock();  
+}

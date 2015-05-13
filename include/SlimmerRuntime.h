@@ -31,7 +31,9 @@
 extern "C" void recordInit(const char *name);
 extern "C" void recordAddLock();
 extern "C" void recordBasicBlockEvent(uint32_t id);
-extern "C" void recordMemoryEvent(uint32_t id, void *p, uint64_t length);
+extern "C" void recordMemoryEvent(uint32_t id, void *addr, uint64_t length);
+extern "C" void recordCallEvent(uint32_t id, void *fun);
+extern "C" void recordReturnEvent(uint32_t id, void *fun);
 
 //===----------------------------------------------------------------------===//
 //                           Constants
@@ -40,7 +42,12 @@ const float LOAD_FACTOR = 0.1;
 const static size_t size_of_ptr = sizeof(void*);
 const static char BasicBlockEventLabel = 0;
 const static char MemoryEventLabel = 1;
-const static char EndEventLabel = 2;
+const static char CallEventLabel = 2;
+const static char ReturnEventLabel = 3;
+const static char EndEventLabel = 4;
+
+
+
 
 
 #endif // SLIMMER_RUNTIME_H

@@ -7,7 +7,8 @@ void readLLVMTrace(char *trace_file_name) {
   char event_label;
   const static size_t bbevent_length = 97 - 1; // except the label
   const static size_t mevent_length = 161 + size_of_ptr - 1;
-  char bbevent[bbevent_length], mevent[mevent_length];
+  const static size_t fevent_length = 97 + size_of_ptr - 1;
+  char bbevent[bbevent_length], mevent[mevent_length], fevent[fevent_length];
   uint64_t *tid, *length;
   uint32_t *id;
   void **addr;
@@ -28,6 +29,20 @@ void readLLVMTrace(char *trace_file_name) {
       addr = (void **)(&mevent[96]);
       length = (uint64_t *)(&mevent[96 + size_of_ptr]);
       printf("MemoryEvent:    %lu\t%u\t%p\t%lu\n", *tid, *id, *addr, *length);
+      break;
+    case CallEventLabel:
+      read(trace, fevent, fevent_length);
+      tid = (uint64_t *)(&fevent[0]);
+      id = (uint32_t *)(&fevent[64]);
+      addr = (void **)(&fevent[96]);
+      printf("CallEvent:    %lu\t%u\t%p\n", *tid, *id, *addr);
+      break;
+    case ReturnEventLabel:
+      read(trace, fevent, fevent_length);
+      tid = (uint64_t *)(&fevent[0]);
+      id = (uint32_t *)(&fevent[64]);
+      addr = (void **)(&fevent[96]);
+      printf("ReturnEvent:    %lu\t%u\t%p\n", *tid, *id, *addr);
       break;
     }
   }

@@ -9,6 +9,7 @@ GNU gold (GNU Binutils 2.25.51.20150507) 1.11
     LLVM_SRC=/path/to/llvm/src
     LLVM_OBJ=$LLVM_SRC/build
     LLVM_BIN=$LLVM_OBJ/Release+Asserts/bin
+    PIN=/path/to/intel/pintool
 
     BINUTILS_INCLUDE=/path/to/binutils/include 
 
@@ -17,7 +18,7 @@ GNU gold (GNU Binutils 2.25.51.20150507) 1.11
 
     CC=$LLVM_BIN/clang CXX=$LLVM_BIN/clang++ ../configure --with-llvmsrc=$LLVM_SRC --with-llvmobj=$LLVM_OBJ --with-binutils-include=$BINUTILS_INCLUDE --enable-optimized=yes
 
-    CC=$LLVM_BIN/clang CXX=$LLVM_BIN/clang++ CPPFLAGS="-I/usr/include/c++/4.8/ -I/usr/include/x86_64-linux-gnu/c++/4.8/" CXXFLAGS="-std=c++11" VERBOSE=1 make
+    PIN_HOME=$PIN CC=$LLVM_BIN/clang CXX=$LLVM_BIN/clang++ CPPFLAGS="-I/usr/include/c++/4.8/ -I/usr/include/x86_64-linux-gnu/c++/4.8/" CXXFLAGS="-std=c++11" VERBOSE=1 make
 
 # Traced Events
 
@@ -45,13 +46,16 @@ The fields of a MemoryEvent are:
 
 We can determine whether the instruction is a load or store by its ID.
 
-## OutputEvent
+## CallEvent & ReturnEvent
 
-An OutputEvent is logged for each output system call.
-It logs the data that impacts the outside system.
+A pair of CallEvent and ReturnEvent is logged for each **uninstrumented** function.
+It is used to infer the data that impacts the outside system.
 
-Currently, the OutputEvent is indirectly inferred by using the dynamic instrumentation tool PIN.
-A LLVM version is in the TODO list.
+The fields of a MemoryEvent are:
+
+    id: the unique instruction ID of the call instruction
+    tid: the thread that executes this instruction
+    fun: the starting address of the function
 
 # Code Information (generated while linking)
 
@@ -98,3 +102,7 @@ Specifically,
 2. both "llvm.memcpy." and "llvm.memmove." are interpreted as a load instruction **and** a store instruction.
 3. "llvm.va_start" and "llvm.va_end" are interpreted as a normal instruction with type "VarArg". They are used for linking the use of a variable-number argument to the argument's definition.
 
+## InstrumentedFun
+
+The name of instrumented functions.
+One function per line.
