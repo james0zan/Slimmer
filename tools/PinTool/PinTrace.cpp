@@ -80,17 +80,55 @@ void readInstrumentedFun(string path, set<string> &instrumentedFun) {
   }
 }
 
-VOID BeforeCall(ADDRINT addr){
-  uint64_t tid = PIN_GetTid();
-  DEBUG("BeforeCall %lu %p\n", tid, (void*)addr);
+map<uint64_t, string> Symbols;
+void getSymbols(string img_name, uint64_t start) {
+  // DEBUG("Load IMG %s %p\n", img_name.c_str(), (void*)start);
+  char readelf_commad[300];
+  sprintf(readelf_commad,
+    "readelf -Ws %s | awk '{if ($4 == \"FUNC\") print $2 " " $8}'",
+    img_name.c_str());
+  FILE *fres = popen(readelf_commad, "r");
+
+  uint64_t addr; char fun_name[300];
+  while (fscanf(fres, "%lx%s", &addr, fun_name) != EOF) {
+    Symbols[addr + start] = fun_name;
+    // DEBUG("Load Symbol: %lx %s\n", addr + start, fun_name);
+  }
+  fclose(fres);
 }
 
+static map<uint64_t, int> pdepth;
+VOID BeforeCall(ADDRINT addr){
+  uint64_t tid = PIN_GetTid();
+  if ((++pdepth[tid]) == 1)
+  DEBUG("BeforeCall %lu %p %s\n", tid, (void*)addr, Symbols[addr].c_str());
+}
 VOID AfterCall(ADDRINT addr){
   uint64_t tid = PIN_GetTid();
-  DEBUG("AfterCall %lu %p\n", tid, (void*)addr);
+  if ((--pdepth[tid]) == 0)
+    DEBUG("AfterCall %lu %p %s\n", tid, (void*)addr, Symbols[addr].c_str());
+}
+
+VOID SyscallEntry(THREADID t, CONTEXT *ctxt, SYSCALL_STANDARD std, VOID *v) {
+  uint64_t tid = PIN_GetTid();
+  int syscall_num = PIN_GetSyscallNumber(ctxt, std);
+  
+  if (pdepth[tid] == 0) return;
+
+  if (syscall_num == 0 || syscall_num == 1
+    || syscall_num == 9
+    || syscall_num == 17 || syscall_num == 18
+    || syscall_num == 20
+    || (syscall_num >= 42 && syscall_num <= 50)
+    || syscall_num == 54 || syscall_num == 62
+    || syscall_num == 68 || syscall_num == 69
+    || (syscall_num >= 82 && syscall_num <=95)
+    || syscall_num == 202 || syscall_num == 295 || syscall_num == 296)
+    DEBUG("SysCall: %lu %d\n", tid, syscall_num);
 }
 
 VOID ImageLoad(IMG img, VOID *v) {
+  getSymbols(IMG_Name(img), IMG_LoadOffset(img));
   for (SEC sec = IMG_SecHead(img); SEC_Valid(sec); sec = SEC_Next(sec)) {
     for (RTN rtn = SEC_RtnHead(sec); RTN_Valid(rtn); rtn = RTN_Next(rtn)) {
       RTN_Open(rtn);
@@ -101,9 +139,9 @@ VOID ImageLoad(IMG img, VOID *v) {
         if(INS_IsCall(ins)) {
           if (INS_IsDirectBranchOrCall(ins)) {
             ADDRINT target = INS_DirectBranchOrCallTargetAddress(ins);
-            
-            // string callName = Symbols[target];
-            // if (notTrace(name) || instrumentedFun.count(name) != 0) continue;
+            string called_fun = Symbols[target];
+            if (notTrace(called_fun) || instrumentedFun.count(called_fun) != 0) continue;
+
             INS next = INS_Next(ins);
             if (INS_Valid(next)) {
               INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)BeforeCall,
@@ -123,10 +161,10 @@ VOID ImageLoad(IMG img, VOID *v) {
 int main(int argc, char *argv[]) {
     PIN_InitSymbols();
     if (PIN_Init(argc, argv)) return 1;
-
     readInstrumentedFun(KnobInstrumentedFun.Value(), instrumentedFun);
-    IMG_AddInstrumentFunction(ImageLoad, 0);
 
+    IMG_AddInstrumentFunction(ImageLoad, 0);
+    PIN_AddSyscallEntryFunction(SyscallEntry, 0);
     PIN_StartProgram();
     return 0;
 }
