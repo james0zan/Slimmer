@@ -149,4 +149,26 @@ One function per line.
                 else:
                     OutputUnusedIns(ins)
 
+# Simple Dynamic AA
+
+A disjoint set is used for maintaining the infomation of pointer groups.
+
+The GetWrited and GetRead function of a ReturnEvent is implemented by union all the pointers' group of that function's parameters.
+
+    for event <- [last event, ..., first event]:
+        if event is MemoryEvent:
+            AddMemoryToGroup(GetGroupID(event.id), event.addr, event.length)
+        if event is BasicBlockEvent:
+            for ins_id <- [last ins of the BB, ..., first]:
+                if the result of ins_id is a pointer:
+                    for i in GetSSADep(ins):
+                        if i is a pointer:
+                            UnionGroup(GetGroupID(ins_id), GetGroupID(i))
+                RemoveGroupInfo(ins_id)
+
+
+
+
+
+
 
