@@ -74,7 +74,7 @@ namespace {
     Function *recordAddLock;
     Function *recordBasicBlockEvent;
     Function *recordMemoryEvent;
-    Function *recordCallEvent;
+    // Function *recordCallEvent;
     Function *recordReturnEvent;
 
     // Integer types
@@ -90,6 +90,10 @@ char SlimmerTrace::ID = 0;
 INITIALIZE_PASS(SlimmerTrace, "slimmer-trace", "The Instrumentation Pass for Slimmer", false, false)
 ModulePass *llvm::createSlimmerTracePass() { return new SlimmerTrace(); }
 
+/// Get the string representation of a LLVM Value.
+///
+/// \param v - the LLVM Value.
+///
 std::string SlimmerTrace::value2String(Value *v) {
   std::string s;
   raw_string_ostream rso(s);
@@ -97,6 +101,11 @@ std::string SlimmerTrace::value2String(Value *v) {
   return s;
 }
 
+/// Get the common part of an instruction's infomation,
+/// no matter which type of instruction it is.
+///
+/// \param ins - the LLVM IR instruction.
+///
 std::string SlimmerTrace::CommonInfo(Instruction *ins) {
   std::string s;
   raw_string_ostream rso(s);
@@ -176,10 +185,10 @@ bool SlimmerTrace::doInitialization(Module& module)  {
     module.getOrInsertFunction("recordMemoryEvent",
       VoidType, Int32Type, VoidPtrType, Int64Type, nullptr));
 
-  // Recording the call to an uninstrumented function
-  recordCallEvent = cast<Function>(
-    module.getOrInsertFunction("recordCallEvent",
-      VoidType, Int32Type, VoidPtrType, nullptr));
+  // // Recording the call to an uninstrumented function
+  // recordCallEvent = cast<Function>(
+  //   module.getOrInsertFunction("recordCallEvent",
+  //     VoidType, Int32Type, VoidPtrType, nullptr));
 
   // Recording the return of an uninstrumented function
   recordReturnEvent = cast<Function>(
@@ -193,6 +202,8 @@ bool SlimmerTrace::doInitialization(Module& module)  {
   return true;
 }
 
+/// Append a creator function for the tracing functions.
+///
 void SlimmerTrace::appendCtor(Module& module) {
   // Create the ctor function.
   Function *ctor = cast<Function>(
@@ -311,10 +322,19 @@ bool SlimmerTrace::runOnModule(Module& module) {
   return false; 
 }
 
+/// Add a call to the recordAddLock function before an instruction.
+///
+/// \param ins_ptr - the LLVM IR instruction.
+///
 void SlimmerTrace::instrumentAddLock(Instruction *ins_ptr) {
   CallInst::Create(recordAddLock)->insertBefore(ins_ptr);
 }
 
+/// Add a call to the recordBasicBlockEvent function
+/// a the begining of a basic block.
+///
+/// \param bb - the basic block.
+///
 void SlimmerTrace::instrumentBasicBlock(BasicBlock *bb) {
   assert(bb2ID.count(bb) > 0);
   Value *bb_ID = ConstantInt::get(Int32Type, bb2ID[bb]);
@@ -324,6 +344,11 @@ void SlimmerTrace::instrumentBasicBlock(BasicBlock *bb) {
   CallInst::Create(recordBasicBlockEvent, args, "", bb->getFirstInsertionPt());
 }
 
+/// Add a call to the recordAddLock function before a load,
+/// and a call to the recordMemoryEvent function after it.
+///
+/// \param load_ptr - the load instruction.
+///
 void SlimmerTrace::instrumentLoadInst(LoadInst *load_ptr) {
   instrumentAddLock(load_ptr);
 
@@ -341,6 +366,11 @@ void SlimmerTrace::instrumentLoadInst(LoadInst *load_ptr) {
   CallInst::Create(recordMemoryEvent, args)->insertAfter(load_ptr);
 }
 
+/// Add a call to the recordAddLock function before a store,
+/// and a call to the recordMemoryEvent function after it.
+///
+/// \param store_ptr - the store instruction.
+///
 void SlimmerTrace::instrumentStoreInst(StoreInst *store_ptr) {
   instrumentAddLock(store_ptr);
 
@@ -358,6 +388,10 @@ void SlimmerTrace::instrumentStoreInst(StoreInst *store_ptr) {
   CallInst::Create(recordMemoryEvent, args)->insertAfter(store_ptr);
 }
 
+/// Add a call to the recordReturnEvent function after the function call.
+///
+/// \param call_ptr - the call instruction.
+///
 void SlimmerTrace::instrumentCallInst(CallInst *call_ptr) {
   // Get the ID of the call instruction.
   assert(ins2ID.count(call_ptr) > 0);
@@ -366,7 +400,7 @@ void SlimmerTrace::instrumentCallInst(CallInst *call_ptr) {
   Value *fun_ptr = LLVMCastTo(call_ptr->getCalledValue(), VoidPtrType, "", call_ptr);
 
   std::vector<Value *> args = make_vector<Value *>(call_id, fun_ptr, 0);
-  CallInst::Create(recordCallEvent, args, "", call_ptr);  
+  // CallInst::Create(recordCallEvent, args, "", call_ptr);  
   CallInst::Create(recordReturnEvent, args)->insertAfter(call_ptr);
 }
 

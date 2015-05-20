@@ -157,7 +157,7 @@ The GetWrited and GetRead function of a ReturnEvent is implemented by union all 
 
     for event <- [last event, ..., first event]:
         if event is MemoryEvent:
-            AddMemoryToGroup(GetGroupID(event.id), event.addr, event.length)
+            AddAddrToGroup(GetGroupID(event.id), event.addr, event.length)
         if event is BasicBlockEvent:
             for ins_id <- [last ins of the BB, ..., first]:
                 if the result of ins_id is a pointer:

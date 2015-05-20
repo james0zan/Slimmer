@@ -4,6 +4,8 @@
 
 namespace llvm {
 
+/// Create a global value for the string.
+///
 GlobalVariable *StringToGV(const std::string& s, Module& module) {
   //create a constant string array and add a null terminator
   Constant *arr = ConstantDataArray::getString(
@@ -48,6 +50,9 @@ Value *LLVMCastTo(Value *V, Type *Ty, Twine Name, Instruction *InsertPt) {
   return ins;
 }
 
+/// Determines whether the function is a call to a function in one of the
+/// Slimmer run-time libraries.
+///
 bool IsSlimmerFunction(Function *fun) {
   if (fun == nullptr) return false;
 

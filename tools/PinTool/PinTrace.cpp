@@ -1,3 +1,4 @@
+#include "SlimmerUtil.h"
 #include "pin.H"
 #include <set>
 #include <map>
@@ -38,6 +39,11 @@ KNOB<string> KnobInstrumentedFun(KNOB_MODE_WRITEONCE, "pintool",
     "i", "Slimmer", "specify the path to the InstrumentedFun file");
 set<string> instrumentedFun;
 
+/// Identify the functions that are not needed to be traced.
+///
+/// \param name - the name of the function.
+/// \return - return true if the function do not need to be traced.
+///
 inline bool notTrace(string name) {
   return (name == "slimmerCtor" ||
           name == "recordInit" ||
@@ -72,6 +78,11 @@ inline bool notTrace(string name) {
 
 }
 
+/// Read the functions that are already traced by LLVM.
+///
+/// \param path - the path to the InstrumentedFun file.
+/// \param instrumentedFun - the set that reserves all the instrumented functions.
+///
 void readInstrumentedFun(string path, set<string> &instrumentedFun) {
   ifstream fInstrumentedFun(path);
   string name;
@@ -80,6 +91,11 @@ void readInstrumentedFun(string path, set<string> &instrumentedFun) {
   }
 }
 
+/// Get the starting address of all the loaded functions.
+///
+/// \param img_name - the path to the loaded image.
+/// \param start - the sstart address of the loaded image.
+///
 map<uint64_t, string> Symbols;
 void getSymbols(string img_name, uint64_t start) {
   // DEBUG("Load IMG %s %p\n", img_name.c_str(), (void*)start);
@@ -97,23 +113,64 @@ void getSymbols(string img_name, uint64_t start) {
   fclose(fres);
 }
 
-static map<uint64_t, int> pdepth;
+// Maintain the depth of call stack for each thread.
+// Only uninstrumented functions are counted.
+map<uint64_t, int> pdepth;
+// This is the very event buffer used by all record functions
+// Call EventBuffer::Init(...) before usage
+EventBuffer pin_event_buffer;
+char syscall_event[65] = {SyscallEventLabel};
+char call_event[65 + size_of_ptr] = {CallEventLabel};
+char return_event[65 + size_of_ptr] = {ReturnEventLabel};
+
+/// Append a CallEvent before the first layer of external functions.
+///
+/// \param addr - the starting address of the function.
+///
 VOID BeforeCall(ADDRINT addr){
   uint64_t tid = PIN_GetTid();
-  if ((++pdepth[tid]) == 1)
-  DEBUG("BeforeCall %lu %p %s\n", tid, (void*)addr, Symbols[addr].c_str());
-}
-VOID AfterCall(ADDRINT addr){
-  uint64_t tid = PIN_GetTid();
-  if ((--pdepth[tid]) == 0)
-    DEBUG("AfterCall %lu %p %s\n", tid, (void*)addr, Symbols[addr].c_str());
+
+  pin_event_buffer.Lock();
+  if ((++pdepth[tid]) == 1) {
+    DEBUG("BeforeCall %lu %p %s\n", tid, (void*)addr, Symbols[addr].c_str());
+
+    memcpy(&call_event[1], &tid, 64);
+    memcpy(&call_event[65], &addr, size_of_ptr);
+    pin_event_buffer.Append(call_event, 65 + size_of_ptr);
+  }
+  pin_event_buffer.Unlock();
 }
 
+/// Append a ReturnEvent after the first layer of external functions.
+///
+/// \param addr - the starting address of the function.
+///
+VOID AfterCall(ADDRINT addr){
+  uint64_t tid = PIN_GetTid();
+
+  pin_event_buffer.Lock();
+  if ((--pdepth[tid]) == 0) {
+    DEBUG("AfterCall %lu %p %s\n", tid, (void*)addr, Symbols[addr].c_str());
+
+    memcpy(&return_event[1], &tid, 64);
+    memcpy(&return_event[65], &addr, size_of_ptr);
+    pin_event_buffer.Append(return_event, 65 + size_of_ptr);
+  }
+  pin_event_buffer.Unlock();
+}
+
+
+/// Append a SyscallEvent for each output syscall.
+///
 VOID SyscallEntry(THREADID t, CONTEXT *ctxt, SYSCALL_STANDARD std, VOID *v) {
   uint64_t tid = PIN_GetTid();
   int syscall_num = PIN_GetSyscallNumber(ctxt, std);
   
-  if (pdepth[tid] == 0) return;
+  pin_event_buffer.Lock();
+  if (pdepth[tid] == 0) {
+    pin_event_buffer.Unlock();
+    return;
+  }
 
   if (syscall_num == 0 || syscall_num == 1
     || syscall_num == 9
@@ -123,10 +180,17 @@ VOID SyscallEntry(THREADID t, CONTEXT *ctxt, SYSCALL_STANDARD std, VOID *v) {
     || syscall_num == 54 || syscall_num == 62
     || syscall_num == 68 || syscall_num == 69
     || (syscall_num >= 82 && syscall_num <=95)
-    || syscall_num == 202 || syscall_num == 295 || syscall_num == 296)
+    || syscall_num == 202 || syscall_num == 295 || syscall_num == 296) {
     DEBUG("SysCall: %lu %d\n", tid, syscall_num);
+
+    memcpy(&syscall_event[1], &tid, 64);
+    pin_event_buffer.Append(syscall_event, 65);
+  }
+  pin_event_buffer.Unlock();
 }
 
+/// Instrument all the calling instructions that call an external function. 
+///
 VOID ImageLoad(IMG img, VOID *v) {
   getSymbols(IMG_Name(img), IMG_LoadOffset(img));
   for (SEC sec = IMG_SecHead(img); SEC_Valid(sec); sec = SEC_Next(sec)) {
@@ -158,13 +222,21 @@ VOID ImageLoad(IMG img, VOID *v) {
   }
 } 
 
+/// Flush the trace buffer. 
+///
+VOID Fini(INT32 code, VOID *p) {
+  pin_event_buffer.CloseBufferFile();
+}
+
 int main(int argc, char *argv[]) {
     PIN_InitSymbols();
     if (PIN_Init(argc, argv)) return 1;
     readInstrumentedFun(KnobInstrumentedFun.Value(), instrumentedFun);
 
+    pin_event_buffer.Init(KnobTraceFile.Value().c_str());
     IMG_AddInstrumentFunction(ImageLoad, 0);
     PIN_AddSyscallEntryFunction(SyscallEntry, 0);
+    PIN_AddFiniFunction(Fini, 0);
     PIN_StartProgram();
     return 0;
 }
