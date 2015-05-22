@@ -6,6 +6,8 @@ GNU gold (GNU Binutils 2.25.51.20150507) 1.11
 
 Intel Pin 2.14 
 
+libboost-iostreams-dev
+
 # Compile Slimmer
 
     LLVM_SRC=/path/to/llvm/src

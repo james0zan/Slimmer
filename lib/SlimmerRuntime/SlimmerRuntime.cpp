@@ -10,10 +10,10 @@
 static EventBuffer event_buffer;
 // The thread id
 static uint64_t __thread local_tid = 0;
-static char __thread basic_block_event[97] = {BasicBlockEventLabel};
-static char __thread memory_event[161 + size_of_ptr] = {MemoryEventLabel};
+static char __thread basic_block_event[97];
+static char __thread memory_event[161 + size_of_ptr];
 // static char __thread call_event[97 + size_of_ptr] = {CallEventLabel};
-static char __thread return_event[97 + size_of_ptr] = {ReturnEventLabel};
+static char __thread return_event[97 + size_of_ptr];
 
 /// A helper function which is registered at atexit()
 ///
@@ -66,14 +66,16 @@ void recordBasicBlockEvent(uint32_t id) {
   if (local_tid == 0) {
     // The first event of a thread will always be a BasicBlockEvent
     local_tid = syscall(SYS_gettid);
-    memcpy(&basic_block_event[1], &local_tid, 64);
-    memcpy(&memory_event[1], &local_tid, 64);
-    // memcpy(&call_event[1], &local_tid, 64);
-    memcpy(&return_event[1], &local_tid, 64);
+    basic_block_event[96] = BasicBlockEventLabel;
+    memcpy(basic_block_event, &local_tid, 64);
+    memory_event[160 + size_of_ptr] = MemoryEventLabel;
+    memcpy(memory_event, &local_tid, 64);
+    return_event[96 + size_of_ptr] = ReturnEventLabel;
+    memcpy(return_event, &local_tid, 64);
   }
   DEBUG("[BasicBlockEvent] id = %u\n", id);
 
-  memcpy(&basic_block_event[65], &id, 32);
+  memcpy(&basic_block_event[64], &id, 32);
   event_buffer.Lock();
   event_buffer.Append(basic_block_event, 97);
   event_buffer.Unlock();
@@ -86,24 +88,14 @@ void recordBasicBlockEvent(uint32_t id) {
 /// \param length - the length of the accessed memory.
 ///
 void recordMemoryEvent(uint32_t id, void *addr, uint64_t length) {
-  memcpy(&memory_event[65], &id, 32);
-  memcpy(&memory_event[97], &addr, size_of_ptr);
-  memcpy(&memory_event[97 + size_of_ptr], &length, 64);
+  memcpy(&memory_event[64], &id, 32);
+  memcpy(&memory_event[96], &addr, size_of_ptr);
+  memcpy(&memory_event[96 + size_of_ptr], &length, 64);
   event_buffer.Append(memory_event, 161 + size_of_ptr);
   event_buffer.Unlock();
 
   DEBUG("[MemoryEvent] id = %u, addr = %p, len = %lu\n", id, addr, length);  
 }
-
-// void recordCallEvent(uint32_t id, void *fun) {
-//   DEBUG("[CallEvent] id = %u, fun = %p\n", id, fun);
-
-//   memcpy(&call_event[65], &id, 32);
-//   memcpy(&call_event[97], &fun, size_of_ptr);
-//   event_buffer.Lock();
-//   event_buffer.Append(call_event, 97 + size_of_ptr);
-//   event_buffer.Unlock();  
-// }
 
 /// Append a ReturnEvent to the trace buffer.
 ///
@@ -113,8 +105,8 @@ void recordMemoryEvent(uint32_t id, void *addr, uint64_t length) {
 void recordReturnEvent(uint32_t id, void *fun) {
   DEBUG("[ReturnEvent] id = %u, fun = %p\n", id, fun);
 
-  memcpy(&return_event[65], &id, 32);
-  memcpy(&return_event[97], &fun, size_of_ptr);
+  memcpy(&return_event[64], &id, 32);
+  memcpy(&return_event[96], &fun, size_of_ptr);
   event_buffer.Lock();
   event_buffer.Append(return_event, 97 + size_of_ptr);
   event_buffer.Unlock();  
