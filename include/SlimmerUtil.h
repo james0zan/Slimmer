@@ -156,9 +156,10 @@ public:
   // void Destroy();
   std::vector<Segment> Collect(uint64_t l, uint64_t r);
   void Collect2(uint64_t l, uint64_t r, std::vector<Segment>& res);
+  void Print(int indent);
 
 private:
-  const int PARTIAL_VALUE = 1;
+  const int PARTIAL_VALUE = -1;
   int value; // 0 = unknow; -1 = not complete
   uint64_t left, right;
   SegmentTree *l_child, *r_child;

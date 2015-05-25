@@ -62,10 +62,11 @@ void SegmentTree::Collect2(uint64_t l, uint64_t r, std::vector<Segment>& res) {
     if (res.size() >= 2) {
       Segment& last = res[res.size() - 1];
       Segment& second_last = res[res.size() - 2];
-      if (std::get<0>(last) == std::get<0>(second_last)
-        && std::get<2>(last) == std::get<1>(second_last)) {
-        last = std::make_tuple(
-          std::get<0>(last), std::get<1>(last), std::get<2>(second_last));
+      
+      if (std::get<0>(second_last) == std::get<0>(last)
+        && std::get<2>(second_last) == std::get<1>(last)) {
+        second_last = std::make_tuple(
+          std::get<0>(second_last), std::get<1>(second_last), std::get<2>(last));
         res.pop_back();
       }
     }
@@ -77,3 +78,23 @@ void SegmentTree::Collect2(uint64_t l, uint64_t r, std::vector<Segment>& res) {
   }
 }
 
+/// Print all the elements of a SegmentTree.
+/// 
+/// \param indent - the level of this node.
+///
+void SegmentTree::Print(int indent) {
+  if (l_child) {
+    l_child->Print(indent + 4);
+  }
+  for (int i = 0; i < indent; ++i) printf(" ");
+  if (l_child) {
+    printf(" /\n");
+    for (int i = 0; i < indent; ++i) printf(" ");
+  }
+  printf("[%lu,%lu):%d\n", left, right, value);
+  if (r_child) {
+    for (int i = 0; i < indent; ++i) printf(" ");
+    printf(" \\\n");
+    r_child->Print(indent + 4);
+  }
+}
