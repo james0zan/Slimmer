@@ -78,19 +78,6 @@ inline bool notTrace(string name) {
 
 }
 
-/// Read the functions that are already traced by LLVM.
-///
-/// \param path - the path to the InstrumentedFun file.
-/// \param instrumentedFun - the set that reserves all the instrumented functions.
-///
-void readInstrumentedFun(string path, set<string> &instrumentedFun) {
-  ifstream fInstrumentedFun(path);
-  string name;
-  while (fInstrumentedFun >> name) {
-    instrumentedFun.insert(name);
-  }
-}
-
 /// Get the starting address of all the loaded functions.
 ///
 /// \param img_name - the path to the loaded image.
@@ -234,7 +221,7 @@ VOID Fini(INT32 code, VOID *p) {
 int main(int argc, char *argv[]) {
     PIN_InitSymbols();
     if (PIN_Init(argc, argv)) return 1;
-    readInstrumentedFun(KnobInstrumentedFun.Value(), instrumentedFun);
+    LoadInstrumentedFun(KnobInstrumentedFun.Value(), instrumentedFun);
 
     pin_event_buffer.Init(KnobTraceFile.Value().c_str());
     IMG_AddInstrumentFunction(ImageLoad, 0);

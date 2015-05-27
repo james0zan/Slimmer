@@ -112,40 +112,43 @@ std::string SlimmerTrace::CommonInfo(Instruction *ins) {
   
   // InstructionID:
   assert(ins2ID.count(ins) > 0);
-  rso << ins2ID[ins] << ":\n";
+  rso << ins2ID[ins] << "\n";
 
   // BasicBlockID,
   assert(bb2ID.count(ins->getParent()) > 0);
-  rso << "\t" << bb2ID[ins->getParent()] << ",\n";
+  rso << "\t" << bb2ID[ins->getParent()] << "\n";
+
+  // Is pointer,
+  rso << "\t" << ins->getType()->isPointerTy() << "\n";
 
   // Line of code, Path to the code file, 
   if (MDNode *dbg = ins->getMetadata("dbg")) {
     DILocation loc(dbg);
-    rso << "\t" << loc.getLineNumber() << ",\n";
+    rso << "\t" << loc.getLineNumber() << "\n";
     std::string path = loc.getDirectory().str() + "/" + loc.getFilename().str();
-    rso << "\t" << base64_encode((unsigned char const*)path.c_str(), path.length()) << ",\n";
+    rso << "\t" << base64_encode((unsigned char const*)path.c_str(), path.length()) << "\n";
   } else {
-    rso << "\t-1,\n\t[UNKNOWN],\n";
+    rso << "\t-1\n\t[UNKNOWN]\n";
   }
 
   // The instruction's LLVM IR
   std::string ins_string = value2String(ins);
-  rso << "\t" << ins_string << ",\n"; // TODO: remove this line
-  rso << "\t" << base64_encode((unsigned char const*)ins_string.c_str(), ins_string.length()) << ",\n";
+  // rso << "\t" << ins_string << ",\n"; // TODO: remove this line
+  rso << "\t" << base64_encode((unsigned char const*)ins_string.c_str(), ins_string.length()) << "\n";
   
   // SSA dependencies
-  rso << "\t[";
+  rso << "\t" << ins->getNumOperands() << " ";
   for (unsigned index = 0; index < ins->getNumOperands(); ++index) {
     if (Instruction *tmp = dyn_cast<Instruction>(ins->getOperand(index))) {
       assert(ins2ID.count(tmp) > 0);
-      rso << "<Inst, " << ins2ID[tmp] << ">, ";
+      rso << "Inst " << ins2ID[tmp] << " ";
     } else if (Argument *arg= dyn_cast<Argument>(ins->getOperand(index))) {
-      rso << "<Arg, " << arg->getArgNo() << ">, ";
+      rso << "Arg " << arg->getArgNo() << " ";
     } else { // A constant
-      rso << "<Constant, 0>, ";
+      rso << "Constan 0 ";
     }
   }
-  rso << "],\n";
+  rso << "\n";
   return s;
 }
 
@@ -252,52 +255,54 @@ bool SlimmerTrace::runOnModule(Module& module) {
   for (auto &ins_ptr: ins_list) {
     fInst << CommonInfo(ins_ptr);
     if (LoadInst *load_ptr = dyn_cast<LoadInst>(ins_ptr)) {
-      fInst << "\tLoadInst,\n";
+      fInst << "\tLoadInst\n";
       instrumentLoadInst(load_ptr);
     } else if (StoreInst *store_ptr = dyn_cast<StoreInst>(ins_ptr)) {
-      fInst << "\tStoreInst,\n";
+      fInst << "\tStoreInst\n";
       instrumentStoreInst(store_ptr);
     } else if (TerminatorInst *terminator_ptr = dyn_cast<TerminatorInst>(ins_ptr)) {
-      fInst << "\tTerminatorInst,\n\t[";
+      fInst << "\tTerminatorInst\n\t" << terminator_ptr->getNumSuccessors() << " ";
           
       // BasicBlockID of successor 1, BasicBlockID of successor 2, ...,
       for (unsigned index = 0; index < terminator_ptr->getNumSuccessors(); ++index) {
         BasicBlock *succ = terminator_ptr->getSuccessor(index);
         assert(bb2ID.count(succ) > 0);
-        fInst << bb2ID[succ] << ", ";
+        fInst << bb2ID[succ] << " ";
       }
 
-      fInst << "],\n";
+      fInst << "\n";
     } else if (PHINode *phi_ptr = dyn_cast<PHINode>(ins_ptr)) {
-      fInst << "\tPhiNode,\n\t[";
+      fInst << "\tPhiNode\n\t" << phi_ptr->getNumIncomingValues() << " ";
 
       // <Income BasicBlockID 1, Income value>, <Income BasicBlockID 2, Income value>, ...,
       for (unsigned index = 0; index < phi_ptr->getNumIncomingValues(); ++index) {
         BasicBlock *bb = phi_ptr->getIncomingBlock(index);
         assert(bb2ID.count(bb) > 0);
-        fInst << "<" << bb2ID[bb] << ", ";
+        fInst << " " << bb2ID[bb] << " ";
 
         if (Instruction *tmp = dyn_cast<Instruction>(phi_ptr->getIncomingValue(index))) {
           assert(ins2ID.count(tmp) > 0);
-          fInst << "<Inst, " << ins2ID[tmp] << "> >, ";
+          fInst << "Inst " << ins2ID[tmp] << " ";
         } else if (Argument *arg= dyn_cast<Argument>(phi_ptr->getIncomingValue(index))) {
-          fInst << "<Arg, " << arg->getArgNo() << "> >, ";
+          fInst << "Arg " << arg->getArgNo() << " ";
         } else { // A constant
-          fInst << "<Constant, 0> >, ";
+          fInst << "Constant 0 ";
         }
       }
 
-      fInst << "],\n";
+      fInst << "\n";
     } else if (CallInst *call_ptr = dyn_cast<CallInst>(ins_ptr)) {
       Function *called_fun = call_ptr->getCalledFunction();
       if (!called_fun) {
-        fInst << "\tCallInst,\n\t[UNKNOWN],\n";
+        fInst << "\tCallInst\n\t[UNKNOWN]\n";
         // TODO
       } else if (called_fun->isIntrinsic()) {
+        std::string fun_name = called_fun->stripPointerCasts()->getName().str();
+        fInst << "\tCallInst\n\t" << fun_name << "\n";
         // TODO
       } else {
         std::string fun_name = called_fun->stripPointerCasts()->getName().str();
-        fInst << "\tCallInst,\n\t" << fun_name << ",\n";
+        fInst << "\tCallInst\n\t" << fun_name << "\n";
         if (instrumentedFun.count(fun_name) == 0) {
           instrumentCallInst(call_ptr);
         }
@@ -305,17 +310,17 @@ bool SlimmerTrace::runOnModule(Module& module) {
     } else if (InvokeInst *invoke_ptr = dyn_cast<InvokeInst>(ins_ptr)) {
       Function *called_fun = invoke_ptr->getCalledFunction();
       if (!called_fun) {
-        fInst << "\tCallInst,\n\t[UNKNOWN],\n";
+        fInst << "\tCallInst\n\t[UNKNOWN]\n";
         // TODO
       } else {
         std::string fun_name = called_fun->stripPointerCasts()->getName().str();
-        fInst << "\tCallInst,\n\t" << fun_name << ",\n";
+        fInst << "\tCallInst\n\t" << fun_name << "\n";
         if (instrumentedFun.count(fun_name) == 0) {
           // TODO
         }
       }
     } else { // Normal Instruction
-      fInst << "\tNormalInst,\n";
+      fInst << "\tNormalInst\n";
     }
   }
   LOG(DEBUG, "SlimmerTrace::runOnModule") << "End";

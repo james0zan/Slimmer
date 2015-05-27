@@ -20,6 +20,8 @@
 #include <unistd.h>
 
 #include <iostream>
+#include <set>
+#include <string>
 #include <sstream>
 
 #define DEBUG_SLIMMER_UTILL
@@ -143,6 +145,8 @@ public:
   SegmentTree() {}
   SegmentTree(unsigned v, uint64_t l, uint64_t r)
     : value(v), left(l), right(r), l_child(NULL), r_child(NULL) {}
+  SegmentTree(unsigned v, uint64_t l, uint64_t r, SegmentTree* lc, SegmentTree*rc)
+    : value(v), left(l), right(r), l_child(lc), r_child(rc) {}
   ~SegmentTree() {
     if (l_child) delete l_child; l_child = NULL;
     if (r_child) delete r_child; r_child = NULL;
@@ -158,7 +162,7 @@ public:
   void Collect2(uint64_t l, uint64_t r, std::vector<Segment>& res);
   void Print(int indent);
 
-private:
+// private:
   const int PARTIAL_VALUE = -1;
   int value; // 0 = unknow; -1 = not complete
   uint64_t left, right;
@@ -178,5 +182,50 @@ const static char CallEventLabel = 2;
 const static char ReturnEventLabel = 3;
 const static char SyscallEventLabel = 4;
 const static char EndEventLabel = 5;
+
+//===----------------------------------------------------------------------===//
+//                           Routines
+//===----------------------------------------------------------------------===//
+
+struct InstInfo {
+  // The instruction ID and the basic block ID.
+  uint32_t ID, BB;
+
+  // Is it a pointer or not?
+  bool IsPointer;
+  
+  // The code infomation.
+  int LoC;
+  std::string File, Code;
+  
+  // SSA dependencies 
+  enum DepType {
+    Inst,
+    Arg,
+    Constant
+  };
+  std::vector<std::pair<DepType, uint32_t> > SSADependencies;
+
+  // Instruction type
+  enum {
+    NormalInst,
+    LoadInst,
+    StoreInst,
+    CallInst,
+    TerminatorInst,
+    PhiNode,
+    VarArg
+  } Type;
+
+  // The called function name or [UNKNOWN] for CallInst.
+  std::string Fun;
+  // The basic block ID of the successors for TerminatorInst.
+  std::vector<uint32_t> Successors;
+  // The income basic block ID, income value type, incame value ID for PhiNode.
+  std::vector<std::tuple<uint32_t, DepType, uint32_t> > PhiDependencies;
+};
+
+void LoadInstrumentedFun(std::string path, std::set<std::string>& instrumented);
+void LoadInstInfo(std::string path, std::vector<InstInfo>& info, std::vector<std::vector<uint32_t> >& bb2ins);
 
 #endif // SLIMMER_UTIL_H

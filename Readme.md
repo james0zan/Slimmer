@@ -70,6 +70,7 @@ in which each line is:
 
     InstructionID:
         BasicBlockID,
+        Is a pointer or not,
         Line of code or -1 if not available,
         Path to the code file (in base64) or [UNKNOWN] if not available,
         The instruction's LLVM IR (in base64),
