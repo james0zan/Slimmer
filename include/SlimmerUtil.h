@@ -232,6 +232,7 @@ struct InstInfo {
   std::vector<std::tuple<uint32_t, DepType, uint32_t> > PhiDependencies;
 };
 
+int GetEvent(bool backward, const char *cur, char& event_label, const uint64_t*& tid_ptr, const uint32_t*& id_ptr, const uint64_t*& addr_ptr, const uint64_t*& length_ptr);
 void LoadInstrumentedFun(std::string path, std::set<std::string>& instrumented);
 void LoadInstInfo(std::string path, std::vector<InstInfo>& info, std::vector<std::vector<uint32_t> >& bb2ins);
 

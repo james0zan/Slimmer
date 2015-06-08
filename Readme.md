@@ -50,7 +50,7 @@ The fields of a MemoryEvent are:
 
 We can determine whether the instruction is a load or store by its ID.
 
-## CallEvent & ReturnEvent
+## CallEvent & ReturnEvent & ArgumentEvent
 
 A pair of CallEvent and ReturnEvent is logged for each **uninstrumented** function.
 It is used to infer the data that impacts the outside system.
@@ -60,6 +60,12 @@ The fields of a CallEvent/ReturnEvent are:
     id: the unique instruction ID of the call instruction
     tid: the thread that executes this instruction
     fun: the starting address of the function
+
+The ArgumentEvent is used for recording the pointer arguments of the uninstrumented functions.
+It contains only two fields, which are:
+
+    tid: the thread that executes this instruction
+    arg: the value of the pointer argument
 
 # Code Information (generated while linking)
 

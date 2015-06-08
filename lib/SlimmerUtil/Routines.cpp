@@ -108,3 +108,43 @@ void LoadInstInfo(string path, vector<InstInfo>& info, vector<vector<uint32_t> >
     info.push_back(ins);
   }
 }
+
+/// Read an event start/end at cur.
+///
+/// \param backward - is the trace readed backward or forward.
+/// \param cur - the start/end address of the event.
+/// \param event_label - the label of the event.
+/// \param *_ptr - the pointer of each fields.
+///
+int GetEvent(bool backward, const char *cur, 
+  char& event_label, const uint64_t*& tid_ptr, const uint32_t*& id_ptr,
+  const uint64_t*& addr_ptr, const uint64_t*& length_ptr) {
+  event_label = (*cur);
+
+  switch (event_label) {
+    case EndEventLabel: return 1;
+    case BasicBlockEventLabel:
+      if (backward) cur -= SizeOfBasicBlockEvent - 1;
+      tid_ptr = (const uint64_t *)(cur + 1);
+      id_ptr = (const uint32_t *)(cur + 65);
+      return SizeOfBasicBlockEvent;
+    case MemoryEventLabel:
+      if (backward) cur -= SizeOfMemoryEvent - 1;
+      tid_ptr = (const uint64_t *)(cur + 1);
+      id_ptr = (const uint32_t *)(cur + 65);
+      addr_ptr = (const uint64_t *)(cur + 97);
+      length_ptr = (const uint64_t *)(cur + 161);
+      return SizeOfMemoryEvent;
+    case ReturnEventLabel:
+      if (backward) cur -= SizeOfReturnEvent - 1;
+      tid_ptr = (const uint64_t *)(cur + 1);
+      id_ptr = (const uint32_t *)(cur + 65);
+      addr_ptr = (const uint64_t *)(cur + 97);
+      return SizeOfReturnEvent;
+    case ArgumentEventLabel:
+      if (backward) cur -= SizeOfArgumentEvent - 1;
+      tid_ptr = (const uint64_t *)(cur + 1);
+      addr_ptr = (const uint64_t *)(cur + 65);\
+      return SizeOfArgumentEvent;
+  }
+}

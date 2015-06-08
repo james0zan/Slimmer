@@ -200,7 +200,7 @@ bool SlimmerTrace::doInitialization(Module& module)  {
       VoidType, Int32Type, VoidPtrType, nullptr));
 
   // Recording a pointer argument of an uninstrumented function
-  recordReturnEvent = cast<Function>(
+  recordArgumentEvent = cast<Function>(
     module.getOrInsertFunction("recordArgumentEvent",
       VoidType, VoidPtrType, nullptr));
 
@@ -404,6 +404,16 @@ void SlimmerTrace::instrumentStoreInst(StoreInst *store_ptr) {
 /// \param call_ptr - the call instruction.
 ///
 void SlimmerTrace::instrumentCallInst(CallInst *call_ptr) {
+  // Record pointer arguments
+  for (unsigned index = 0; index < call_ptr->getNumArgOperands(); ++index) {
+    Value *arg = call_ptr->getArgOperand(index);
+    if (arg->getType()->isPointerTy()) {
+      Value *arg_ptr = LLVMCastTo(arg, VoidPtrType, "", call_ptr);
+      std::vector<Value *> args = make_vector<Value *>(arg_ptr, 0);
+      CallInst::Create(recordArgumentEvent, args, "", call_ptr);
+    }
+  }
+
   // Get the ID of the call instruction.
   assert(ins2ID.count(call_ptr) > 0);
   Value *call_id = ConstantInt::get(Int32Type, ins2ID[call_ptr]);
@@ -414,18 +424,6 @@ void SlimmerTrace::instrumentCallInst(CallInst *call_ptr) {
   // CallInst::Create(recordCallEvent, args, "", call_ptr);  
   auto last_ins = CallInst::Create(recordReturnEvent, args);
   last_ins->insertAfter(call_ptr);
-
-  // Record pointer arguments
-  for (unsigned index = 0; index < call_ptr->getNumOperands(); ++index) {
-    Value *arg = call_ptr->getOperand(index);
-    if (arg->getType()->isPointerTy()) {
-      Value *arg_ptr = LLVMCastTo(arg, VoidPtrType, "", last_ins);
-      std::vector<Value *> args2 = make_vector<Value *>(arg_ptr, 0);
-      auto tmp = CallInst::Create(recordArgumentEvent, args2);
-      tmp->insertAfter(last_ins);
-      last_ins = tmp;
-    }
-  }
 }
 
 

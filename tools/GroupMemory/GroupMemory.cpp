@@ -109,37 +109,6 @@ int Merging(set<int> groups) {
   return new_group;
 }
 
-int GetEvent(bool backward, const char *cur, 
-  char& event_label, const uint64_t*& tid_ptr, const uint32_t*& id_ptr,
-  const uint64_t*& addr_ptr, const uint64_t*& length_ptr) {
-  event_label = (*cur);
-
-  switch (event_label) {
-  case EndEventLabel: return 1;
-  case BasicBlockEventLabel:
-    if (backward) cur -= SizeOfBasicBlockEvent - 1;
-    tid_ptr = (const uint64_t *)(cur + 1);
-    id_ptr = (const uint32_t *)(cur + 65);
-    // printf("BasicBlockEvent: %lu\t%u\n", *tid_ptr, *id_ptr);
-    return SizeOfBasicBlockEvent;
-  case MemoryEventLabel:
-    if (backward) cur -= SizeOfMemoryEvent - 1;
-    tid_ptr = (const uint64_t *)(cur + 1);
-    id_ptr = (const uint32_t *)(cur + 65);
-    addr_ptr = (const uint64_t *)(cur + 97);
-    length_ptr = (const uint64_t *)(cur + 161);
-    // printf("MemoryEvent:     %lu\t%u\t%p\t%lu\n", *tid_ptr, *id_ptr, (void*)*addr_ptr, *length_ptr);
-    return SizeOfMemoryEvent;
-  case ReturnEventLabel:
-    if (backward) cur -= SizeOfReturnEvent - 1;
-    tid_ptr = (const uint64_t *)(cur + 1);
-    id_ptr = (const uint32_t *)(cur + 65);
-    addr_ptr = (const uint64_t *)(cur + 97);
-    // printf("ReturnEvent:     %lu\t%u\t%p\n", *tid_ptr, *id_ptr, (void*)*addr_ptr);
-    return SizeOfReturnEvent;
-  }
-}
-
 void GroupMemory(char *trace_file_name) {
   Addr2Group = SegmentTree::NewTree();
   Group2Addr.clear();

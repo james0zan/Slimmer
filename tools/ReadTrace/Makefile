@@ -9,7 +9,8 @@
 
 LEVEL := ../..
 TOOLNAME = read-trace
+USEDLIBS = SlimmerUtil.a
 
 include $(LEVEL)/Makefile.common
-# LIBS += -lglog
+LIBS += -lboost_system -lboost_iostreams
 

@@ -52,6 +52,7 @@ inline bool notTrace(string name) {
           name == "recordMemoryEvent" ||
           name == "recordCallEvent" ||
           name == "recordReturnEvent" ||
+          name == "recordArgumentEvent" ||
           name == "memcpy" ||
           name == "memmove‘" ||
           name == "memset" ||
