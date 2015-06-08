@@ -106,25 +106,25 @@ map<uint64_t, int> pdepth;
 // This is the very event buffer used by all record functions
 // Call EventBuffer::Init(...) before usage
 EventBuffer pin_event_buffer;
-char syscall_event[65] ;
-char call_event[65 + size_of_ptr];
-char return_event[65 + size_of_ptr];
+char syscall_event[66];
+char call_event[130];
+char return_event[130];
 
 /// Append a CallEvent before the first layer of external functions.
 ///
 /// \param addr - the starting address of the function.
 ///
-VOID BeforeCall(ADDRINT addr){
+VOID BeforeCall(ADDRINT fun){
   uint64_t tid = PIN_GetTid();
 
   pin_event_buffer.Lock();
   if ((++pdepth[tid]) == 1) {
-    DEBUG("BeforeCall %lu %p %s\n", tid, (void*)addr, Symbols[addr].c_str());
+    DEBUG("BeforeCall %lu %p %s\n", tid, (void*)fun, Symbols[fun].c_str());
 
-    memcpy(call_event, &tid, 64);
-    memcpy(&call_event[64], &addr, size_of_ptr);
-    call_event[64 + size_of_ptr] = CallEventLabel;
-    pin_event_buffer.Append(call_event, 65 + size_of_ptr);
+    call_event[0] = call_event[129] = CallEventLabel;
+    (*(uint64_t *)(call_event + 1)) = tid;
+    (*(uint64_t *)(call_event + 65)) = (uint64_t)fun;
+    pin_event_buffer.Append(call_event, 130);
   }
   pin_event_buffer.Unlock();
 }
@@ -133,17 +133,17 @@ VOID BeforeCall(ADDRINT addr){
 ///
 /// \param addr - the starting address of the function.
 ///
-VOID AfterCall(ADDRINT addr){
+VOID AfterCall(ADDRINT fun){
   uint64_t tid = PIN_GetTid();
 
   pin_event_buffer.Lock();
   if ((--pdepth[tid]) == 0) {
-    DEBUG("AfterCall %lu %p %s\n", tid, (void*)addr, Symbols[addr].c_str());
+    DEBUG("AfterCall %lu %p %s\n", tid, (void*)fun, Symbols[fun].c_str());
 
-    memcpy(return_event, &tid, 64);
-    memcpy(&return_event[64], &addr, size_of_ptr);
-    return_event[64 + size_of_ptr] = ReturnEventLabel;
-    pin_event_buffer.Append(return_event, 65 + size_of_ptr);
+    return_event[0] = return_event[129] = ReturnEventLabel;
+    (*(uint64_t *)(return_event + 1)) = tid;
+    (*(uint64_t *)(return_event + 65)) = (uint64_t)fun;
+    pin_event_buffer.Append(return_event, 130);
   }
   pin_event_buffer.Unlock();
 }
@@ -172,9 +172,9 @@ VOID SyscallEntry(THREADID t, CONTEXT *ctxt, SYSCALL_STANDARD std, VOID *v) {
     || syscall_num == 202 || syscall_num == 295 || syscall_num == 296) {
     DEBUG("SysCall: %lu %d\n", tid, syscall_num);
 
-    memcpy(syscall_event, &tid, 64);
-    syscall_event[64] = SyscallEventLabel;
-    pin_event_buffer.Append(syscall_event, 65);
+    syscall_event[0] = syscall_event[65] = SyscallEventLabel;
+    (*(uint64_t *)(syscall_event + 1)) = tid;
+    pin_event_buffer.Append(syscall_event, 66);
   }
   pin_event_buffer.Unlock();
 }

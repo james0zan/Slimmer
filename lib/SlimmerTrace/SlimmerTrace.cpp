@@ -76,6 +76,7 @@ namespace {
     Function *recordMemoryEvent;
     // Function *recordCallEvent;
     Function *recordReturnEvent;
+    Function *recordArgumentEvent;
 
     // Integer types
     Type *Int8Type;
@@ -197,6 +198,11 @@ bool SlimmerTrace::doInitialization(Module& module)  {
   recordReturnEvent = cast<Function>(
     module.getOrInsertFunction("recordReturnEvent",
       VoidType, Int32Type, VoidPtrType, nullptr));
+
+  // Recording a pointer argument of an uninstrumented function
+  recordReturnEvent = cast<Function>(
+    module.getOrInsertFunction("recordArgumentEvent",
+      VoidType, VoidPtrType, nullptr));
 
 
   // Create the constructor
@@ -406,7 +412,20 @@ void SlimmerTrace::instrumentCallInst(CallInst *call_ptr) {
 
   std::vector<Value *> args = make_vector<Value *>(call_id, fun_ptr, 0);
   // CallInst::Create(recordCallEvent, args, "", call_ptr);  
-  CallInst::Create(recordReturnEvent, args)->insertAfter(call_ptr);
+  auto last_ins = CallInst::Create(recordReturnEvent, args);
+  last_ins->insertAfter(call_ptr);
+
+  // Record pointer arguments
+  for (unsigned index = 0; index < call_ptr->getNumOperands(); ++index) {
+    Value *arg = call_ptr->getOperand(index);
+    if (arg->getType()->isPointerTy()) {
+      Value *arg_ptr = LLVMCastTo(arg, VoidPtrType, "", last_ins);
+      std::vector<Value *> args2 = make_vector<Value *>(arg_ptr, 0);
+      auto tmp = CallInst::Create(recordArgumentEvent, args2);
+      tmp->insertAfter(last_ins);
+      last_ins = tmp;
+    }
+  }
 }
 
 

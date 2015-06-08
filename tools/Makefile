@@ -8,6 +8,6 @@ LEVEL=..
 #
 # List all of the subdirectories that we will compile.
 #
-DIRS = SlimmerGold ReadTrace PinTool GroupMemory
+DIRS = SlimmerGold PinTool GroupMemory
 
 include $(LEVEL)/Makefile.common

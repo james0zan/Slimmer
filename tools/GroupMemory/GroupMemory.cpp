@@ -109,6 +109,37 @@ int Merging(set<int> groups) {
   return new_group;
 }
 
+int GetEvent(bool backward, const char *cur, 
+  char& event_label, const uint64_t*& tid_ptr, const uint32_t*& id_ptr,
+  const uint64_t*& addr_ptr, const uint64_t*& length_ptr) {
+  event_label = (*cur);
+
+  switch (event_label) {
+  case EndEventLabel: return 1;
+  case BasicBlockEventLabel:
+    if (backward) cur -= SizeOfBasicBlockEvent - 1;
+    tid_ptr = (const uint64_t *)(cur + 1);
+    id_ptr = (const uint32_t *)(cur + 65);
+    // printf("BasicBlockEvent: %lu\t%u\n", *tid_ptr, *id_ptr);
+    return SizeOfBasicBlockEvent;
+  case MemoryEventLabel:
+    if (backward) cur -= SizeOfMemoryEvent - 1;
+    tid_ptr = (const uint64_t *)(cur + 1);
+    id_ptr = (const uint32_t *)(cur + 65);
+    addr_ptr = (const uint64_t *)(cur + 97);
+    length_ptr = (const uint64_t *)(cur + 161);
+    // printf("MemoryEvent:     %lu\t%u\t%p\t%lu\n", *tid_ptr, *id_ptr, (void*)*addr_ptr, *length_ptr);
+    return SizeOfMemoryEvent;
+  case ReturnEventLabel:
+    if (backward) cur -= SizeOfReturnEvent - 1;
+    tid_ptr = (const uint64_t *)(cur + 1);
+    id_ptr = (const uint32_t *)(cur + 65);
+    addr_ptr = (const uint64_t *)(cur + 97);
+    // printf("ReturnEvent:     %lu\t%u\t%p\n", *tid_ptr, *id_ptr, (void*)*addr_ptr);
+    return SizeOfReturnEvent;
+  }
+}
+
 void GroupMemory(char *trace_file_name) {
   Addr2Group = SegmentTree::NewTree();
   Group2Addr.clear();
@@ -118,93 +149,112 @@ void GroupMemory(char *trace_file_name) {
   auto data = trace.data();
 
   char event_label;
-  const uint64_t *tid, *length;
-  const uint32_t *id;
-  const void **addr;
+  const uint64_t *tid_ptr, *length_ptr, *addr_ptr;
+  const uint32_t *id_ptr;
   
   set<int> shoud_merge;
-  for (int64_t cur = trace.size() - 1; cur > 0; --cur) {
-    event_label = data[cur];
-    switch (event_label) {
-      case ReturnEventLabel:
-        cur -= (96 + size_of_ptr);
-        break;
-      case BasicBlockEventLabel:
-        cur -= 32; id = (const uint32_t *)(&data[cur]);
-        cur -= 64; tid = (const uint64_t *)(&data[cur]);
-        // printf("BasicBlockEvent: %lu\t%u\n", *tid, *id);
-
-        for (int _ = BB2Ins[*id].size() - 1; _ >= 0; --_) {
-          int ins_id = BB2Ins[*id][_];
-          if (!Ins[ins_id].IsPointer) continue;
-
-          // Merging
-          shoud_merge.clear();
-          if (Ins2Group.count(I(*tid, ins_id)))
-            shoud_merge.insert(Ins2Group[I(*tid, ins_id)]);
-          for (auto dep: Ins[ins_id].SSADependencies) {
-            if (dep.first == InstInfo::Inst && Ins[dep.second].IsPointer
-              && Ins2Group.count(I(*tid, dep.second))) {
-              shoud_merge.insert(Ins2Group[I(*tid, dep.second)]);
-            }
-          }
-          int new_group = Merging(shoud_merge);
-          
-          // Clear old groups
-          for (auto dep: Ins[ins_id].SSADependencies) {
-            if (!(dep.first == InstInfo::Inst && Ins[dep.second].IsPointer)) continue;
-            
-            Ins2Group[I(*tid, dep.second)] = new_group;
-            Group2Ins[new_group].insert(I(*tid, dep.second));
-          }
-          Group2Ins[Ins2Group[I(*tid, ins_id)]].erase(I(*tid, ins_id));
-          Ins2Group.erase(I(*tid, ins_id));
+  for (int64_t cur = trace.size() - 1; cur > 0;) {
+    cur -= GetEvent(true, &data[cur], event_label, tid_ptr, id_ptr, addr_ptr, length_ptr);
+    if (event_label == MemoryEventLabel) {
+      shoud_merge.clear();
+      vector<pair<uint64_t, uint64_t> > ranges;
+      for (auto i: Collect(*addr_ptr, (*addr_ptr) + (*length_ptr))) {
+        int origin_group = get<0>(i);
+        if (origin_group == 0) {
+          ranges.push_back(make_pair(get<1>(i), get<2>(i)));
+        } else {
+          shoud_merge.insert(origin_group);
         }
-        break;
-      case MemoryEventLabel:
-        cur -= 64;  length = (const uint64_t *)(&data[cur]);
-        cur -= size_of_ptr; addr = (const void **)(&data[cur]);
-        cur -= 32; id = (const uint32_t *)(&data[cur]);
-        cur -= 64; tid = (const uint64_t *)(&data[cur]);
-        // printf("MemoryEvent:     %lu\t%u\t%p\t%lu\n", *tid, *id, *addr, *length);
+      }
+        
+      int new_group = Merging(shoud_merge);
+      for (auto i: ranges) {
+        Group2Addr[new_group]->Set(i.first, i.second, 1);
+        Addr2Group->Set(i.first, i.second, new_group);
+      }
+        
+      int pointer_id = (Ins[*id_ptr].Type == InstInfo::LoadInst ? Ins[*id_ptr].SSADependencies[0].second : Ins[*id_ptr].SSADependencies[1].second);
+      auto ins = I(*tid_ptr, pointer_id);
+      if (Ins2Group.count(ins)) Group2Ins[Ins2Group[ins]].erase(ins);
+      Ins2Group[ins] = new_group; Group2Ins[new_group].insert(ins);
+    } else if (event_label == BasicBlockEventLabel) {
+      for (int _ = BB2Ins[*id_ptr].size() - 1; _ >= 0; --_) {
+        int ins_id = BB2Ins[*id_ptr][_];
+        if (!Ins[ins_id].IsPointer) continue;
+        if (Ins[ins_id].Type == InstInfo::CallInst) continue;
 
+        // Merging
         shoud_merge.clear();
-        vector<pair<uint64_t, uint64_t> > ranges;
-        for (auto i: Collect((uint64_t)(*addr), (uint64_t)(*addr) + (*length))) {
-          int origin_group = get<0>(i);
-          if (origin_group == 0) {
-            ranges.push_back(make_pair(get<1>(i), get<2>(i)));
-          } else {
-            shoud_merge.insert(origin_group);
-          }
+        auto ins = I(*tid_ptr, ins_id);
+        if (Ins2Group.count(ins)) shoud_merge.insert(Ins2Group[ins]);
+        for (auto dep: Ins[ins_id].SSADependencies) {
+          if (!(dep.first == InstInfo::Inst && Ins[dep.second].IsPointer)) continue;
+          pair<uint64_t, uint32_t> dependent_ins = I(*tid_ptr, dep.second);
+          if (Ins2Group.count(dependent_ins)) shoud_merge.insert(Ins2Group[dependent_ins]);
         }
-        
         int new_group = Merging(shoud_merge);
-        for (auto i: ranges) {
-          Group2Addr[new_group]->Set(i.first, i.second, 1);
-          Addr2Group->Set(i.first, i.second, new_group);
-        }
         
-        int pointer_id = (Ins[*id].Type == InstInfo::LoadInst ? Ins[*id].SSADependencies[0].second : Ins[*id].SSADependencies[1].second);
-        Ins2Group[I(*tid, pointer_id)] = new_group;
-        Group2Ins[new_group].insert(I(*tid, pointer_id));
-        break;
+        // Clear old groups
+        for (auto dep: Ins[ins_id].SSADependencies) {
+          if (!(dep.first == InstInfo::Inst && Ins[dep.second].IsPointer)) continue;
+          auto dependent_ins = I(*tid_ptr, dep.second);
+          Ins2Group[dependent_ins] = new_group;
+          Group2Ins[new_group].insert(dependent_ins);
+        }
+        Group2Ins[Ins2Group[ins]].erase(ins);
+        Ins2Group.erase(ins);
+      }
     }
   }
 
-  auto cur = Addr2Group->Collect(0, SegmentTree::MAX_RANGE);
-  for (auto i: cur) {
-    printf("[%lx,%lx):%d\n", get<1>(i), get<2>(i), get<0>(i));
-  }
+  // auto cur = Addr2Group->Collect(0, SegmentTree::MAX_RANGE);
+  // for (auto i: cur) {
+  //   printf("[%lx,%lx):%d\n", get<1>(i), get<2>(i), get<0>(i));
+  // }
 
-  delete Addr2Group;
-  for (auto& i: Group2Addr) {
-    delete i.second;
+  // delete Addr2Group;
+  // for (auto& i: Group2Addr) {
+  //   delete i.second;
+  // }
+  // Group2Addr.clear();
+}
+
+void ExtractMemoryDependency(char *trace_file_name, char *output_file_name) {
+  boost::iostreams::mapped_file_source trace(trace_file_name);
+  auto data = trace.data();
+
+  char event_label;
+  const uint64_t *tid_ptr, *length_ptr, *addr_ptr;
+  const uint32_t *id_ptr;
+  
+  for (int64_t cur = 0; cur < trace.size();) {
+    cur += GetEvent(true, &data[cur], event_label, tid_ptr, id_ptr, addr_ptr, length_ptr);
+    // if (event_label == MemoryEventLabel) {
+    //   if (Ins[*id_ptr].Type == InstInfo::StoreInst) {
+    //     Addr2LastStore->Set(*addr_ptr, *addr_ptr + *length_ptr, dyn);
+    //   } else {
+    //     for (auto j: Addr2LastStore->Collect(*addr_ptr, *addr_ptr + *length_ptr)) {
+    //       if (get<0>(j) != 0) {
+    //         OutputMemoryDependency(dyn, get<0>(j));
+    //       }
+    //     }
+    //   }
+    // } else if (event_label == ReturnEvent) {
+      
+    // }
   }
-  Group2Addr.clear();
 }
 
 int main(int argc, char *argv[]) {
+  if (argc != 3 && argc != 4) {
+    printf("Usage: group-memory inst-file trace-file [output-file]\n");
+    exit(1);
+  }
   LoadInstInfo(argv[1], Ins, BB2Ins);
   GroupMemory(argv[2]);
+  if (argc == 3) {
+    ExtractMemoryDependency(argv[2], "SlimmerMemoryDependency");
+  } else {
+    ExtractMemoryDependency(argv[2], argv[3]);
+  }
 }

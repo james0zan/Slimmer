@@ -173,7 +173,6 @@ public:
 //                           Constants
 //===----------------------------------------------------------------------===//
 const float LOAD_FACTOR = 0.1;
-const static size_t size_of_ptr = sizeof(void*);
 // The first byte of each event,
 // representing the type of the event.
 const static char BasicBlockEventLabel = 0;
@@ -181,7 +180,15 @@ const static char MemoryEventLabel = 1;
 const static char CallEventLabel = 2;
 const static char ReturnEventLabel = 3;
 const static char SyscallEventLabel = 4;
-const static char EndEventLabel = 5;
+const static char ArgumentEventLabel = 5;
+const static char EndEventLabel = 6;
+// The size of each evet
+// Common part of each event: 2 label + Thread ID + ID
+const static size_t SizeOfEventCommon = 2 + 64 + 32;
+const static size_t SizeOfBasicBlockEvent = SizeOfEventCommon;
+const static size_t SizeOfMemoryEvent = SizeOfEventCommon + 2 * 64;
+const static size_t SizeOfReturnEvent = SizeOfEventCommon + 64;
+const static size_t SizeOfArgumentEvent = 2 + 64 + 64;
 
 //===----------------------------------------------------------------------===//
 //                           Routines
