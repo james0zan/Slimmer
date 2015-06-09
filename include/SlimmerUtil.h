@@ -135,41 +135,6 @@ private:
 };
 
 //===----------------------------------------------------------------------===//
-//                           Segment Tree
-//===----------------------------------------------------------------------===//
-
-
-typedef std::tuple<int, uint64_t, uint64_t> Segment;
-class SegmentTree {
-public:
-  SegmentTree() {}
-  SegmentTree(unsigned v, uint64_t l, uint64_t r)
-    : value(v), left(l), right(r), l_child(NULL), r_child(NULL) {}
-  SegmentTree(unsigned v, uint64_t l, uint64_t r, SegmentTree* lc, SegmentTree*rc)
-    : value(v), left(l), right(r), l_child(lc), r_child(rc) {}
-  ~SegmentTree() {
-    if (l_child) delete l_child; l_child = NULL;
-    if (r_child) delete r_child; r_child = NULL;
-  }
-  static const uint64_t MAX_RANGE = (uint64_t)-1;
-  static SegmentTree* NewTree()  {
-    return new SegmentTree(0, 0, SegmentTree::MAX_RANGE);
-  }
-
-  void Set(uint64_t l, uint64_t r, unsigned _v);
-  // void Destroy();
-  std::vector<Segment> Collect(uint64_t l, uint64_t r);
-  void Collect2(uint64_t l, uint64_t r, std::vector<Segment>& res);
-  void Print(int indent);
-
-// private:
-  const int PARTIAL_VALUE = -1;
-  int value; // 0 = unknow; -1 = not complete
-  uint64_t left, right;
-  SegmentTree *l_child, *r_child;
-};
-
-//===----------------------------------------------------------------------===//
 //                           Constants
 //===----------------------------------------------------------------------===//
 const float LOAD_FACTOR = 0.1;

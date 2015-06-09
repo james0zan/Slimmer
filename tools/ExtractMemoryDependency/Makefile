@@ -8,7 +8,7 @@
 ##===----------------------------------------------------------------------===##
 
 LEVEL := ../..
-TOOLNAME = group-memory
+TOOLNAME = extract-memory-dependency
 USEDLIBS = SlimmerUtil.a
 
 include $(LEVEL)/Makefile.common
