@@ -261,7 +261,7 @@ void GroupMemory(char *trace_file_name, char *output_file_name) {
 
 int main(int argc, char *argv[]) {
   if (argc != 3 && argc != 4) {
-    printf("Usage: group-memory inst-file trace-file [output-file]\n");
+    printf("Usage: extract-memory-dependency inst-file trace-file [output-file]\n");
     exit(1);
   }
   LoadInstInfo(argv[1], Ins, BB2Ins);

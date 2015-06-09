@@ -8,6 +8,6 @@ LEVEL=..
 #
 # List all of the subdirectories that we will compile.
 #
-DIRS = SlimmerGold PinTool ReadTrace ExtractMemoryDependency
+DIRS = SlimmerGold PinTool ReadTrace ExtractMemoryDependency ExtractImpactfulFunCall
 
 include $(LEVEL)/Makefile.common
