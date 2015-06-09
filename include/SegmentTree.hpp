@@ -43,6 +43,8 @@ public:
     return new SegmentTree<T>(EMPTY_SEGMENT, T(), 0, SegmentTree<T>::MAX_RANGE);
   }
 
+  /// Set a range [l, r) to be value _v.
+  ///
   void Set(uint64_t l, uint64_t r, T v) {
     // assert(_v > 0); int v = (int)_v; // 0 and -1 are reserved
     
@@ -85,6 +87,10 @@ public:
     }
   }
 
+  /// Get the value at point x.
+  /// \param x - the point that the user want to get.
+  /// \return return false if the point is not covered.
+  ///
   bool Get(uint64_t x, T& v) {
     if (type == EMPTY_SEGMENT) return false;
     if (type == COVERED_SEGMENT) {
@@ -97,13 +103,16 @@ public:
     else { return r_child->Get(x, v); }
   }
 
-  // void Destroy();
+  /// Collect the leaves within range [l, r).
+  ///
   std::vector<Segment<T> > Collect(uint64_t l, uint64_t r) {
     std::vector<Segment<T> > res;
     Collect2(l, r, res);
     return res;  
   }
 
+  /// Collect is a wrapper of Collect2.
+  ///
   void Collect2(uint64_t l, uint64_t r, std::vector<Segment<T> >& res) {
     if (type != PARTIAL_SEGMENT) {
       res.push_back(Segment<T>(type, value, left, right));
@@ -125,25 +134,12 @@ public:
       if (r > mid) { r_child->Collect2(std::max(l, mid), r, res); }
     }
   }
-  // void Print(int indent);
 
   SegmentType type;
-// private:
-  // const int PARTIAL_VALUE = -1;
-  T value; // 0 = unknow; -1 = not complete
+  T value;
   uint64_t left, right;
   SegmentTree<T> *l_child, *r_child;
 };
-
-/// Set a range [l, r) to be value _v.
-///
-
-
-/// Collect the leaves within range [l, r).
-///
-
-/// Collect is a wrapper of Collect2.
-///
 
 
 #endif // SLIMMER_SEGMENT_TREE_HPP
