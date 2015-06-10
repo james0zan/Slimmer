@@ -1,4 +1,4 @@
-#===- Slimmer/tools/ExtractMemoryDependency/Makefile ----------------------------------*- Makefile -*-===##
+#===- Slimmer/tools/ExtractUneededOperation/Makefile ----------------------------------*- Makefile -*-===##
 # 
 #                     The LLVM Compiler Infrastructure
 #
@@ -8,7 +8,7 @@
 ##===----------------------------------------------------------------------===##
 
 LEVEL := ../..
-TOOLNAME = extract-memory-dependency
+TOOLNAME = extract-uneeded-operation
 USEDLIBS = SlimmerUtil.a
 
 include $(LEVEL)/Makefile.common

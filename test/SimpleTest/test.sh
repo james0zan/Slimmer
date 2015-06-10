@@ -17,3 +17,6 @@ $LD_NEW -z relro --hash-style=gnu --build-id --eh-frame-hdr -m elf_x86_64 -dynam
   -L/home/zhangmx/GSoC/Slimmer/build/Release+Asserts/lib \
   -lSlimmerRuntime -lSlimmerUtil -lpthread
 $PIN_HOME/pin.sh -t ../../build/Release+Asserts/lib/SlimmerPinTool.so -i Slimmer/InstrumentedFun -- ./main
+../../build/Release+Asserts/bin/extract-memory-dependency Slimmer/Inst SlimmerTrace 
+../../build/Release+Asserts/bin/extract-impactful-funcall SlimmerPinTrace 
+../../build/Release+Asserts/bin/extract-uneeded-operation Slimmer/Inst SlimmerMemoryDependency SlimmerImpactFunCall SlimmerTrace 

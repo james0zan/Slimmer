@@ -106,16 +106,9 @@ int Merging(set<int> groups) {
   return new_group;
 }
 
-struct DynamicInst {
-  uint64_t TID;
-  uint32_t ID, Cnt;
-  DynamicInst() {}
-  DynamicInst(uint64_t tid, uint32_t id, uint32_t cnt) : TID(tid), ID(id), Cnt(cnt) {}
-  bool operator==(const DynamicInst& rhs) {
-    return TID == rhs.TID && ID == rhs.ID && Cnt == rhs.Cnt;
-  }
-};
+
 void ExtractMemoryDependency(char *trace_file_name, char *output_file_name) {
+  FILE *output_file = fopen(output_file_name, "w");
   boost::iostreams::mapped_file_source trace(trace_file_name);
   auto data = trace.data();
 
@@ -140,8 +133,11 @@ void ExtractMemoryDependency(char *trace_file_name, char *output_file_name) {
 
         for (auto j: Addr2LastStore->Collect(*addr_ptr, *addr_ptr + *length_ptr)) {
           if (j.type == COVERED_SEGMENT) {
-            printf("\t* the %d-th execution of\n\t  instruction %d, %s\n\t  from thread %lu is depended on\n",
+            printf("\t* the %d-th execution of\n\t  instruction %d, %s\n\t  from thread %lu\n",
               j.value.Cnt, j.value.ID, Ins[j.value.ID].Code.c_str(), j.value.TID);
+            fprintf(output_file, "%lu %d %d %lu %d %d\n",
+              dyn_inst.TID, dyn_inst.ID, dyn_inst.Cnt,
+              j.value.TID, j.value.ID, j.value.Cnt);
           }
         }
       }
@@ -158,8 +154,11 @@ void ExtractMemoryDependency(char *trace_file_name, char *output_file_name) {
           if (i.type == COVERED_SEGMENT) {
             for (auto j: Addr2LastStore->Collect(i.left, i.right)) {
               if (j.type == COVERED_SEGMENT) {
-                printf("\t* the %d-th execution of\n\t  instruction %d, %s\n\t  from thread %lu is depended on\n",
+                printf("\t* the %d-th execution of\n\t  instruction %d, %s\n\t  from thread %lu\n",
                   j.value.Cnt, j.value.ID, Ins[j.value.ID].Code.c_str(), j.value.TID);
+                fprintf(output_file, "%lu %d %d %lu %d %d\n",
+                  dyn_inst.TID, dyn_inst.ID, dyn_inst.Cnt,
+                  j.value.TID, j.value.ID, j.value.Cnt);
               }
             }
             Addr2LastStore->Set(i.left, i.right, dyn_inst);
@@ -169,8 +168,10 @@ void ExtractMemoryDependency(char *trace_file_name, char *output_file_name) {
       ArgGroup.erase(*tid_ptr);  
     }
   }
+  fprintf(output_file, "0 -1 -1 0 -1 -1\n");
   for (auto i: InstCount) {
     printf("Thread %lu has executed instruction %d %d-th\n", i.first.first, i.first.second, i.second);
+    fprintf(output_file, "%lu %d %d\n", i.first.first, i.first.second, i.second);
   }
   delete Addr2Group;
   delete Addr2LastStore;
@@ -178,6 +179,7 @@ void ExtractMemoryDependency(char *trace_file_name, char *output_file_name) {
     delete i.second;
   }
   Group2Addr.clear();
+  fclose(output_file);
 }
 
 void GroupMemory(char *trace_file_name, char *output_file_name) {

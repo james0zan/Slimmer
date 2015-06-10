@@ -201,4 +201,23 @@ int GetEvent(bool backward, const char *cur, char& event_label, const uint64_t*&
 void LoadInstrumentedFun(std::string path, std::set<std::string>& instrumented);
 void LoadInstInfo(std::string path, std::vector<InstInfo>& info, std::vector<std::vector<uint32_t> >& bb2ins);
 
+//===----------------------------------------------------------------------===//
+//                           Dynamic Instruction
+//===----------------------------------------------------------------------===//
+
+struct DynamicInst {
+  uint64_t TID;
+  int32_t ID, Cnt;
+  DynamicInst() {}
+  DynamicInst(uint64_t tid, int32_t id, int32_t cnt) : TID(tid), ID(id), Cnt(cnt) {}
+  bool operator==(const DynamicInst& rhs) {
+    return TID == rhs.TID && ID == rhs.ID && Cnt == rhs.Cnt;
+  }
+  bool operator<(const DynamicInst& rhs) const {
+    if (TID != rhs.TID) return TID < rhs.TID;
+    if (ID != rhs.ID) return ID < rhs.ID;
+    return Cnt < rhs.Cnt;
+  }
+};
+
 #endif // SLIMMER_UTIL_H
