@@ -15,6 +15,8 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
+const float LOAD_FACTOR = 0.2;
+
 /// Init a buffer for buffering the trace.
 ///
 /// \param name - the path to the trace file.
@@ -23,13 +25,15 @@ void EventBuffer::Init(const char *name) {
   long pages = sysconf(_SC_PHYS_PAGES);
   long page_size = sysconf(_SC_PAGE_SIZE);
   
-  size = ((uint64_t)(pages * LOAD_FACTOR)) * page_size;
+  size = 16*1024*1024;//((uint64_t)(pages * LOAD_FACTOR)) * page_size;
   
   buffer = (char *)malloc(size);
-  assert(buffer && "Failed to malloc the event bufffer!\n");
+  compressed = (char *)malloc(LZ4_compressBound(size));
+  assert(buffer && compressed && "Failed to malloc the event bufffer!\n");
 
   fd = open(name, O_RDWR | O_CREAT | O_TRUNC, 0640u);
   assert(fd != -1 && "Failed to open tracing file!\n");
+  
   DEBUG("[SLIMMER] Opened trace file: %s\n", name);
 
   // Initialize all of the other fields.
@@ -43,17 +47,21 @@ void EventBuffer::Init(const char *name) {
 /// Flush all the buffered log into the file,
 /// and then close the file.
 ///
+__attribute__((always_inline))
 void EventBuffer::CloseBufferFile() {
   if (!inited) return;
   DEBUG("[SLIMMER] Writing buffered data to trace file and closing.\n");
   // Create an end event to terminate the log.
   Append(&EndEventLabel, sizeof(EndEventLabel));
 
+  int after_compress = LZ4_compress_limitedOutput((const char *)buffer, (char *)compressed, offset, LZ4_compressBound(size));
+  write(fd, &after_compress, sizeof(after_compress));
   size_t cur = 0;
-  while (cur < offset) {
-    size_t tmp = write(fd, buffer + cur, offset - cur);
+  while (cur < after_compress) {
+    size_t tmp = write(fd, compressed + cur, after_compress - cur);
     if (tmp > 0) cur += tmp;
   }
+  
   close(fd);
   pthread_spin_destroy(&lock);
   inited = false;
@@ -64,11 +72,14 @@ void EventBuffer::CloseBufferFile() {
 /// \param event - the starting address of the event.
 /// \param length - the length of the event.
 ///
+__attribute__((always_inline))
 void EventBuffer::Append(const char *event, size_t length) {
   if (offset + length > size) {
+    int after_compress = LZ4_compress_limitedOutput((const char *)buffer, (char *)compressed, offset, LZ4_compressBound(size));
+    write(fd, &after_compress, sizeof(after_compress));
     size_t cur = 0;
-    while (cur < offset) {
-      size_t tmp = write(fd, buffer + cur, offset - cur);
+    while (cur < after_compress) {
+      size_t tmp = write(fd, compressed + cur, after_compress - cur);
       if (tmp > 0) cur += tmp;
     }
     offset = 0;

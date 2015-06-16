@@ -286,6 +286,7 @@ void PassManagerBuilder::populateLTOPassManager(PassManagerBase &PM,
 
   // Added For SLIMMER Start
   PM.add(createSlimmerTracePass());
+  // PM.add(createFunctionInliningPass());
   // Added For SLIMMER End
 
   // Deleted For SLIMMER Start

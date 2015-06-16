@@ -54,6 +54,7 @@ void recordInit(const char *name) {
 
 /// A wrapper of locking the trace buffer.
 ///
+__attribute__((always_inline))
 void recordAddLock() {
   event_buffer.Lock();
 }
@@ -62,6 +63,7 @@ void recordAddLock() {
 ///
 /// \param id - the basic block ID.
 ///
+__attribute__((always_inline))
 void recordBasicBlockEvent(uint32_t id) {
   if (local_tid == 0) {
     // The first event of a thread will always be a BasicBlockEvent
@@ -89,6 +91,7 @@ void recordBasicBlockEvent(uint32_t id) {
 /// \param addr - the starting address of the accessed memory.
 /// \param length - the length of the accessed memory.
 ///
+__attribute__((always_inline))
 void recordMemoryEvent(uint32_t id, void *addr, uint64_t length) {
   (*(uint32_t *)(memory_event + 65)) = id;
   (*(uint64_t *)(memory_event + 97)) = (uint64_t)addr;
@@ -104,6 +107,7 @@ void recordMemoryEvent(uint32_t id, void *addr, uint64_t length) {
 /// \param id - the instruction ID.
 /// \param fun - the address of the called function.
 ///
+__attribute__((always_inline))
 void recordReturnEvent(uint32_t id, void *fun) {
   DEBUG("[ReturnEvent] id = %u, fun = %p\n", id, fun);
 
@@ -119,6 +123,7 @@ void recordReturnEvent(uint32_t id, void *fun) {
 ///
 /// \param arg - the pointer argument.
 ///
+__attribute__((always_inline))
 void recordArgumentEvent(void *arg) {
   DEBUG("[ArgumentEvent] arg = %p\n", arg);
 

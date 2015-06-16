@@ -155,7 +155,7 @@ std::string SlimmerTrace::CommonInfo(Instruction *ins) {
 
 bool SlimmerTrace::doInitialization(Module& module)  {
   LOG(DEBUG, "SlimmerTrace::doInitialization") << "Start";
-  
+
   // Reserve the infomation directory and the files
   LOG(DEBUG, "SlimmerTrace::InfoDir") << InfoDir;
   system(("mkdir -p " + InfoDir).c_str());
@@ -238,6 +238,7 @@ void SlimmerTrace::appendCtor(Module& module) {
 
 bool SlimmerTrace::runOnModule(Module& module) { 
   LOG(DEBUG, "SlimmerTrace::runOnModule") << "Start";
+
   dataLayout = &getAnalysis<DataLayout>();
 
   // The basic block (instruction) ID is started from 0

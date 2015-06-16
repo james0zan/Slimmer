@@ -4,6 +4,8 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Module.h"
 
+#include "lz4.h"
+
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,7 +26,7 @@
 #include <string>
 #include <sstream>
 
-#define DEBUG_SLIMMER_UTILL
+// #define DEBUG_SLIMMER_UTILL
 #ifdef DEBUG_SLIMMER_UTILL
 #define DEBUG(...) fprintf(stderr, __VA_ARGS__)
 #else
@@ -126,7 +128,7 @@ public:
 
 private:
   bool inited;
-  char *buffer;
+  char *buffer, *compressed;
   int fd;
   size_t offset;
   size_t size; // Size of the event buffer in bytes
@@ -137,7 +139,6 @@ private:
 //===----------------------------------------------------------------------===//
 //                           Constants
 //===----------------------------------------------------------------------===//
-const float LOAD_FACTOR = 0.1;
 // The first byte of each event,
 // representing the type of the event.
 const static char BasicBlockEventLabel = 0;
