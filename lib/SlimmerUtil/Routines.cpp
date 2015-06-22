@@ -123,6 +123,7 @@ int GetEvent(bool backward, const char *cur,
 
   switch (event_label) {
     case EndEventLabel: return 1;
+    case PlaceHolderLabel: return 1;
     case BasicBlockEventLabel:
       if (backward) cur -= SizeOfBasicBlockEvent - 1;
       tid_ptr = (const uint64_t *)(cur + 1);

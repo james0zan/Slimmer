@@ -19,7 +19,7 @@ LogLevel _log_level = DEBUG;
 static cl::opt<std::string> TraceFilename(
   "trace-file",
   cl::desc("Name of the trace file"),
-  cl::init("SlimmerTrace"));
+  cl::init("/scratch1/zhangmx/SlimmerTrace"));
 static cl::opt<std::string> InfoDir(
   "slimmer-info-dir",
   cl::desc("The directory that reserves all the generated code infomation"),
@@ -63,7 +63,7 @@ namespace {
     std::string CommonInfo(Instruction *ins);
 
     // The instrumentation functions
-    void instrumentAddLock(Instruction *ins_ptr);
+    // void instrumentAddLock(Instruction *ins_ptr);
     void instrumentBasicBlock(BasicBlock *bb);
     void instrumentLoadInst(LoadInst *load_ins);
     void instrumentStoreInst(StoreInst *store_ptr);
@@ -71,7 +71,7 @@ namespace {
 
     // Functions for recording events during execution
     Function *recordInit;
-    Function *recordAddLock;
+    // Function *recordAddLock;
     Function *recordBasicBlockEvent;
     Function *recordMemoryEvent;
     // Function *recordCallEvent;
@@ -175,9 +175,9 @@ bool SlimmerTrace::doInitialization(Module& module)  {
       VoidType, VoidPtrType, nullptr));
 
   // Lock the trace file
-  recordAddLock = cast<Function>(
-    module.getOrInsertFunction("recordAddLock",
-      VoidType, nullptr));
+  // recordAddLock = cast<Function>(
+  //   module.getOrInsertFunction("recordAddLock",
+  //     VoidType, nullptr));
 
   // Recording a BasicBlockEvent.
   recordBasicBlockEvent = cast<Function>(
@@ -338,9 +338,9 @@ bool SlimmerTrace::runOnModule(Module& module) {
 ///
 /// \param ins_ptr - the LLVM IR instruction.
 ///
-void SlimmerTrace::instrumentAddLock(Instruction *ins_ptr) {
-  CallInst::Create(recordAddLock)->insertBefore(ins_ptr);
-}
+// void SlimmerTrace::instrumentAddLock(Instruction *ins_ptr) {
+//   CallInst::Create(recordAddLock)->insertBefore(ins_ptr);
+// }
 
 /// Add a call to the recordBasicBlockEvent function
 /// a the begining of a basic block.
@@ -362,7 +362,7 @@ void SlimmerTrace::instrumentBasicBlock(BasicBlock *bb) {
 /// \param load_ptr - the load instruction.
 ///
 void SlimmerTrace::instrumentLoadInst(LoadInst *load_ptr) {
-  instrumentAddLock(load_ptr);
+  // instrumentAddLock(load_ptr);
 
   // Get the ID of the load instruction.
   assert(ins2ID.count(load_ptr) > 0);
@@ -384,7 +384,7 @@ void SlimmerTrace::instrumentLoadInst(LoadInst *load_ptr) {
 /// \param store_ptr - the store instruction.
 ///
 void SlimmerTrace::instrumentStoreInst(StoreInst *store_ptr) {
-  instrumentAddLock(store_ptr);
+  // instrumentAddLock(store_ptr);
 
   // Get the ID of the load instruction.
   assert(ins2ID.count(store_ptr) > 0);

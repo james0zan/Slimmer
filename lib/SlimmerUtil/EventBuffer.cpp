@@ -56,12 +56,19 @@ void EventBuffer::CloseBufferFile() {
 
   int after_compress = LZ4_compress_limitedOutput((const char *)buffer, (char *)compressed, offset, LZ4_compressBound(size));
   write(fd, &after_compress, sizeof(after_compress));
+  // fprintf(stderr, "1. Before %lu After %lu %lf\n", offset, after_compress, (double)offset/after_compress);
   size_t cur = 0;
   while (cur < after_compress) {
     size_t tmp = write(fd, compressed + cur, after_compress - cur);
     if (tmp > 0) cur += tmp;
   }
   
+  // size_t cur = 0;
+  // while (cur < offset) {
+  //   size_t tmp = write(fd, buffer + cur, offset - cur);
+  //   if (tmp > 0) cur += tmp;
+  // }
+
   close(fd);
   pthread_spin_destroy(&lock);
   inited = false;
@@ -77,11 +84,19 @@ void EventBuffer::Append(const char *event, size_t length) {
   if (offset + length > size) {
     int after_compress = LZ4_compress_limitedOutput((const char *)buffer, (char *)compressed, offset, LZ4_compressBound(size));
     write(fd, &after_compress, sizeof(after_compress));
+    // fprintf(stderr, "2. Before %lu After %lu %lf\n", offset, after_compress, (double)offset/after_compress);
     size_t cur = 0;
     while (cur < after_compress) {
       size_t tmp = write(fd, compressed + cur, after_compress - cur);
       if (tmp > 0) cur += tmp;
     }
+
+    // size_t cur = 0;
+    // while (cur < offset) {
+    //   size_t tmp = write(fd, buffer + cur, offset - cur);
+    //   if (tmp > 0) cur += tmp;
+    // }
+
     offset = 0;
   }
   assert(offset + length <= size);

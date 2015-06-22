@@ -79,7 +79,7 @@ void recordBasicBlockEvent(uint32_t id) {
   }
   DEBUG("[BasicBlockEvent] id = %u\n", id);
 
-  (*(uint32_t *)(basic_block_event + 65)) = id;
+  (*(uint32_t *)(basic_block_event + 9)) = id;
   event_buffer.Lock();
   event_buffer.Append(basic_block_event, SizeOfBasicBlockEvent);
   event_buffer.Unlock();
@@ -93,9 +93,9 @@ void recordBasicBlockEvent(uint32_t id) {
 ///
 __attribute__((always_inline))
 void recordMemoryEvent(uint32_t id, void *addr, uint64_t length) {
-  (*(uint32_t *)(memory_event + 65)) = id;
-  (*(uint64_t *)(memory_event + 97)) = (uint64_t)addr;
-  (*(uint64_t *)(memory_event + 161)) = length;
+  (*(uint32_t *)(memory_event + 9)) = id;
+  (*(uint64_t *)(memory_event + 13)) = (uint64_t)addr;
+  (*(uint64_t *)(memory_event + 21)) = length;
   event_buffer.Append(memory_event, SizeOfMemoryEvent);
   event_buffer.Unlock();
 
@@ -111,8 +111,8 @@ __attribute__((always_inline))
 void recordReturnEvent(uint32_t id, void *fun) {
   DEBUG("[ReturnEvent] id = %u, fun = %p\n", id, fun);
 
-  (*(uint32_t *)(return_event + 65)) = id;
-  (*(uint64_t *)(return_event + 97)) = (uint64_t)fun;
+  (*(uint32_t *)(return_event + 9)) = id;
+  (*(uint64_t *)(return_event + 13)) = (uint64_t)fun;
 
   event_buffer.Lock();
   event_buffer.Append(return_event, SizeOfReturnEvent);
@@ -127,7 +127,7 @@ __attribute__((always_inline))
 void recordArgumentEvent(void *arg) {
   DEBUG("[ArgumentEvent] arg = %p\n", arg);
 
-  (*(uint64_t *)(argument_event + 65)) = (uint64_t)arg;
+  (*(uint64_t *)(argument_event + 9)) = (uint64_t)arg;
 
   event_buffer.Lock();
   event_buffer.Append(argument_event, SizeOfArgumentEvent);

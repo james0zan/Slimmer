@@ -8,6 +8,8 @@ Intel Pin 2.14
 
 libboost-iostreams-dev
 
+liblz4-dev
+
 # Compile Slimmer
 
     LLVM_SRC=/path/to/llvm/src

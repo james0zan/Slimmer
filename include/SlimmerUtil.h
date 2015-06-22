@@ -148,13 +148,15 @@ const static char ReturnEventLabel = 3;
 const static char SyscallEventLabel = 4;
 const static char ArgumentEventLabel = 5;
 const static char EndEventLabel = 6;
+const static char PlaceHolderLabel = 7;
+
 // The size of each evet
 // Common part of each event: 2 label + Thread ID + ID
-const static size_t SizeOfEventCommon = 2 + 64 + 32;
+const static size_t SizeOfEventCommon = 2 + 8 + 4;
 const static size_t SizeOfBasicBlockEvent = SizeOfEventCommon;
-const static size_t SizeOfMemoryEvent = SizeOfEventCommon + 2 * 64;
-const static size_t SizeOfReturnEvent = SizeOfEventCommon + 64;
-const static size_t SizeOfArgumentEvent = 2 + 64 + 64;
+const static size_t SizeOfMemoryEvent = SizeOfEventCommon + 2 * 8;
+const static size_t SizeOfReturnEvent = SizeOfEventCommon + 8;
+const static size_t SizeOfArgumentEvent = 2 + 8 + 8;
 
 //===----------------------------------------------------------------------===//
 //                           Routines
