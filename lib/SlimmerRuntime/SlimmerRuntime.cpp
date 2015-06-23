@@ -1,19 +1,113 @@
 #include "SlimmerRuntime.h"
 #include "SlimmerUtil.h"
 
+#include <atomic>
+
+//===----------------------------------------------------------------------===//
+//                        Trace Event Buffer
+//===----------------------------------------------------------------------===//
+
+class CircularBuffer {
+public:
+  void Init(const char *name);
+  void CloseBufferFile();
+  ~CircularBuffer() { CloseBufferFile(); }
+  char* StartAppend(size_t length);
+  void EndAppend();
+
+private:
+  bool inited;
+  char *buffer, *compressed;
+  int fd;
+
+  size_t size; // Size of the event buffer in bytes
+  size_t offset;
+  std::atomic_flag append_lock = ATOMIC_FLAG_INIT;
+
+  void Dump(const char *start, uint64_t length);
+};
+
+/// Init a buffer for buffering the trace.
+///
+/// \param name - the path to the trace file.
+///
+void CircularBuffer::Init(const char *name) {
+  size = 16lu*1024lu*1024;
+  
+  buffer = (char *)malloc(size);
+  compressed = (char *)malloc(LZ4_compressBound(size));
+  assert(buffer && compressed && "Failed to malloc the event bufffer!\n");
+
+  fd = open(name, O_RDWR | O_CREAT | O_TRUNC, 0640u);
+  assert(fd != -1 && "Failed to open tracing file!\n");
+  
+  DEBUG("[SLIMMER] Opened trace file: %s\n", name);
+
+  // Initialize all of the other fields.
+  offset = 0;
+  append_lock.clear(std::memory_order_release);
+  inited = true;
+}
+
+/// Flush all the buffered log into the file,
+/// and then close the file.
+///
+__attribute__((always_inline))
+void CircularBuffer::CloseBufferFile() {
+  if (!inited) return;
+  DEBUG("[SLIMMER] Writing buffered data to trace file and closing.\n");
+  
+  int after_compress = LZ4_compress_limitedOutput((const char *)buffer, (char *)compressed, offset, LZ4_compressBound(size));
+  Dump(compressed, after_compress);
+  
+  // Dump(buffer, offset);
+
+  // Create an end event to terminate the log.
+  while (write(fd, &EndEventLabel, sizeof(EndEventLabel)) != 1);
+  close(fd);
+  inited = false;
+}
+
+__attribute__((always_inline))
+char* CircularBuffer::StartAppend(size_t length) {
+  while (append_lock.test_and_set(std::memory_order_acquire));
+
+  if (offset + length > size) {
+    int after_compress = LZ4_compress_limitedOutput((const char *)buffer, (char *)compressed, offset, LZ4_compressBound(size));
+    Dump(compressed, after_compress);
+
+    // Dump(buffer, offset);
+    offset = 0;
+  }
+  char *ret = buffer + offset;
+  offset += length;
+  return ret;
+}
+
+__attribute__((always_inline))
+void CircularBuffer::EndAppend() {
+  append_lock.clear(std::memory_order_release);
+}
+
+__attribute__((always_inline))
+void CircularBuffer::Dump(const char *start, uint64_t length) {
+  write(fd, &length, sizeof(length));
+  uint64_t cur = 0;;
+  while (cur < length) {
+    size_t tmp = write(fd, start + cur, length - cur);
+    if (tmp > 0) cur += tmp;
+  }
+}
+
 //===----------------------------------------------------------------------===//
 //                       Record and Helper Functions
 //===----------------------------------------------------------------------===//
 
 // This is the very event buffer used by all record functions
 // Call EventBuffer::Init(...) before usage
-static EventBuffer event_buffer;
+static CircularBuffer event_buffer;
 // The thread id
 static uint64_t __thread local_tid = 0;
-static char __thread basic_block_event[SizeOfBasicBlockEvent];
-static char __thread memory_event[SizeOfMemoryEvent];
-static char __thread return_event[SizeOfReturnEvent];
-static char __thread argument_event[SizeOfArgumentEvent];
 
 /// A helper function which is registered at atexit()
 ///
@@ -52,13 +146,6 @@ void recordInit(const char *name) {
   signal(SIGFPE, cleanup_only_tracing);
 }
 
-/// A wrapper of locking the trace buffer.
-///
-__attribute__((always_inline))
-void recordAddLock() {
-  event_buffer.Lock();
-}
-
 /// Append a BasicBlockEvent to the trace buffer.
 ///
 /// \param id - the basic block ID.
@@ -68,21 +155,18 @@ void recordBasicBlockEvent(uint32_t id) {
   if (local_tid == 0) {
     // The first event of a thread will always be a BasicBlockEvent
     local_tid = syscall(SYS_gettid);
-    basic_block_event[0] = basic_block_event[SizeOfBasicBlockEvent - 1] = BasicBlockEventLabel;
-    (*(uint64_t *)(basic_block_event + 1)) = local_tid;
-    memory_event[0] = memory_event[SizeOfMemoryEvent - 1] = MemoryEventLabel;
-    (*(uint64_t *)(memory_event + 1)) = local_tid;
-    return_event[0] = return_event[SizeOfReturnEvent - 1] = ReturnEventLabel;
-    (*(uint64_t *)(return_event + 1)) = local_tid;
-    argument_event[0] = argument_event[SizeOfArgumentEvent - 1] = ArgumentEventLabel;
-    (*(uint64_t *)(argument_event + 1)) = local_tid;
   }
   DEBUG("[BasicBlockEvent] id = %u\n", id);
 
-  (*(uint32_t *)(basic_block_event + 9)) = id;
-  event_buffer.Lock();
-  event_buffer.Append(basic_block_event, SizeOfBasicBlockEvent);
-  event_buffer.Unlock();
+  char *buffer = event_buffer.StartAppend(SizeOfBasicBlockEvent);
+  
+  *buffer = BasicBlockEventLabel;
+  (*(uint64_t *)(buffer + 1)) = local_tid;
+  (*(uint32_t *)(buffer + 9)) = id;
+  *(buffer + 13) = BasicBlockEventLabel;
+
+  // memcpy(buffer, basic_block_event, SizeOfBasicBlockEvent);
+  event_buffer.EndAppend();
 }
 
 /// Append a MemoryEvent to the trace buffer.
@@ -93,12 +177,16 @@ void recordBasicBlockEvent(uint32_t id) {
 ///
 __attribute__((always_inline))
 void recordMemoryEvent(uint32_t id, void *addr, uint64_t length) {
-  (*(uint32_t *)(memory_event + 9)) = id;
-  (*(uint64_t *)(memory_event + 13)) = (uint64_t)addr;
-  (*(uint64_t *)(memory_event + 21)) = length;
-  event_buffer.Append(memory_event, SizeOfMemoryEvent);
-  event_buffer.Unlock();
+  char *buffer = event_buffer.StartAppend(SizeOfMemoryEvent);
+  
+  *buffer = MemoryEventLabel;
+  (*(uint64_t *)(buffer + 1)) = local_tid;
+  (*(uint32_t *)(buffer + 9)) = id;
+  (*(uint64_t *)(buffer + 13)) = (uint64_t)addr;
+  (*(uint64_t *)(buffer + 21)) = length;
+  *(buffer + 29) = MemoryEventLabel;
 
+  event_buffer.EndAppend();
   DEBUG("[MemoryEvent] id = %u, addr = %p, len = %lu\n", id, addr, length);  
 }
 
@@ -111,12 +199,15 @@ __attribute__((always_inline))
 void recordReturnEvent(uint32_t id, void *fun) {
   DEBUG("[ReturnEvent] id = %u, fun = %p\n", id, fun);
 
-  (*(uint32_t *)(return_event + 9)) = id;
-  (*(uint64_t *)(return_event + 13)) = (uint64_t)fun;
+  char *buffer = event_buffer.StartAppend(SizeOfReturnEvent);
 
-  event_buffer.Lock();
-  event_buffer.Append(return_event, SizeOfReturnEvent);
-  event_buffer.Unlock();  
+  *buffer = ReturnEventLabel;
+  (*(uint64_t *)(buffer + 1)) = local_tid;
+  (*(uint32_t *)(buffer + 9)) = id;
+  (*(uint64_t *)(buffer + 13)) = (uint64_t)fun;
+  *(buffer + 21) = ReturnEventLabel;
+  
+  event_buffer.EndAppend(); 
 }
 
 /// Append an ArgumentEvent to the trace buffer.
@@ -127,9 +218,12 @@ __attribute__((always_inline))
 void recordArgumentEvent(void *arg) {
   DEBUG("[ArgumentEvent] arg = %p\n", arg);
 
-  (*(uint64_t *)(argument_event + 9)) = (uint64_t)arg;
+  char *buffer = event_buffer.StartAppend(SizeOfArgumentEvent);
 
-  event_buffer.Lock();
-  event_buffer.Append(argument_event, SizeOfArgumentEvent);
-  event_buffer.Unlock();  
+  *buffer = ArgumentEventLabel;
+  (*(uint64_t *)(buffer + 1)) = local_tid;
+  (*(uint64_t *)(buffer + 9)) = (uint64_t)arg;
+  *(buffer + 17) = ArgumentEventLabel;
+
+  event_buffer.EndAppend();
 }

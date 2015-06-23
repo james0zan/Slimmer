@@ -7,7 +7,6 @@
 //                           Forward declearation
 //===----------------------------------------------------------------------===//
 extern "C" void recordInit(const char *name);
-extern "C" void recordAddLock();
 extern "C" void recordBasicBlockEvent(uint32_t id);
 extern "C" void recordMemoryEvent(uint32_t id, void *addr, uint64_t length);
 extern "C" void recordCallEvent(uint32_t id, void *fun);
