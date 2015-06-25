@@ -16,22 +16,35 @@ void readLLVMTrace(char *trace_file_name) {
   const uint64_t *tid_ptr, *length_ptr, *addr_ptr;
   const uint32_t *id_ptr;
   
-  for (int64_t cur = 0; cur < trace.size();) {
-    cur += GetEvent(false, &data[cur], event_label, tid_ptr, id_ptr, addr_ptr, length_ptr);
-    switch (event_label) {
-      case BasicBlockEventLabel:
-        printf("BasicBlockEvent: %lu\t%u\n", *tid_ptr, *id_ptr);
-        break;
-      case MemoryEventLabel:
-        printf("MemoryEvent:     %lu\t%u\t%p\t%lu\n", *tid_ptr, *id_ptr, (void*)*addr_ptr, *length_ptr);
-        break;
-      case ReturnEventLabel:
-        printf("ReturnEvent:     %lu\t%u\t%p\n", *tid_ptr, *id_ptr, (void*)*addr_ptr);
-         break;
-      case ArgumentEventLabel:
-        printf("ArgumentEvent:   %lu\t%p\n", *tid_ptr, (void*)*addr_ptr);
-         break;
+  bool ended = false;
+  char *buffer = (char *)malloc(COMPRESS_BLOCK_SIZE);
+
+  for (size_t _ = 0; !ended && _ < trace.size();) {
+    uint64_t length = (*(uint64_t *)(&data[_]));
+    _ += sizeof(uint64_t);
+
+    LZ4_decompress_safe ((const char*) &data[_], buffer, length, COMPRESS_BLOCK_SIZE);
+    for (uint64_t cur = 0; !ended && cur < length;) {
+      cur += GetEvent(false, buffer + cur, event_label, tid_ptr, id_ptr, addr_ptr, length_ptr);
+      switch (event_label) {
+        case BasicBlockEventLabel:
+          printf("BasicBlockEvent: %lu\t%u\n", *tid_ptr, *id_ptr);
+          break;
+        case MemoryEventLabel:
+          printf("MemoryEvent:     %lu\t%u\t%p\t%lu\n", *tid_ptr, *id_ptr, (void*)*addr_ptr, *length_ptr);
+          break;
+        case ReturnEventLabel:
+          printf("ReturnEvent:     %lu\t%u\t%p\n", *tid_ptr, *id_ptr, (void*)*addr_ptr);
+           break;
+        case ArgumentEventLabel:
+          printf("ArgumentEvent:   %lu\t%p\n", *tid_ptr, (void*)*addr_ptr);
+           break;
+        case EndEventLabel:
+          ended = true;
+          break;
+      }
     }
+    _ += length + sizeof(uint64_t);
   }
 }
 

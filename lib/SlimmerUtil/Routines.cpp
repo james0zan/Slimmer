@@ -127,25 +127,25 @@ int GetEvent(bool backward, const char *cur,
     case BasicBlockEventLabel:
       if (backward) cur -= SizeOfBasicBlockEvent - 1;
       tid_ptr = (const uint64_t *)(cur + 1);
-      id_ptr = (const uint32_t *)(cur + 65);
+      id_ptr = (const uint32_t *)(cur + 9);
       return SizeOfBasicBlockEvent;
     case MemoryEventLabel:
       if (backward) cur -= SizeOfMemoryEvent - 1;
       tid_ptr = (const uint64_t *)(cur + 1);
-      id_ptr = (const uint32_t *)(cur + 65);
-      addr_ptr = (const uint64_t *)(cur + 97);
-      length_ptr = (const uint64_t *)(cur + 161);
+      id_ptr = (const uint32_t *)(cur + 9);
+      addr_ptr = (const uint64_t *)(cur + 13);
+      length_ptr = (const uint64_t *)(cur + 21);
       return SizeOfMemoryEvent;
     case ReturnEventLabel:
       if (backward) cur -= SizeOfReturnEvent - 1;
       tid_ptr = (const uint64_t *)(cur + 1);
-      id_ptr = (const uint32_t *)(cur + 65);
-      addr_ptr = (const uint64_t *)(cur + 97);
+      id_ptr = (const uint32_t *)(cur + 9);
+      addr_ptr = (const uint64_t *)(cur + 13);
       return SizeOfReturnEvent;
     case ArgumentEventLabel:
       if (backward) cur -= SizeOfArgumentEvent - 1;
       tid_ptr = (const uint64_t *)(cur + 1);
-      addr_ptr = (const uint64_t *)(cur + 65);\
+      addr_ptr = (const uint64_t *)(cur + 9);\
       return SizeOfArgumentEvent;
   }
 }

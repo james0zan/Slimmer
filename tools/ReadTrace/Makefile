@@ -12,5 +12,5 @@ TOOLNAME = read-trace
 USEDLIBS = SlimmerUtil.a
 
 include $(LEVEL)/Makefile.common
-LIBS += -lboost_system -lboost_iostreams
+LIBS += -lboost_system -lboost_iostreams -llz4
 

@@ -158,6 +158,9 @@ const static size_t SizeOfMemoryEvent = SizeOfEventCommon + 2 * 8;
 const static size_t SizeOfReturnEvent = SizeOfEventCommon + 8;
 const static size_t SizeOfArgumentEvent = 2 + 8 + 8;
 
+#define COMPRESS_BLOCK_CNT 150
+#define COMPRESS_BLOCK_SIZE 33554432lu
+
 //===----------------------------------------------------------------------===//
 //                           Routines
 //===----------------------------------------------------------------------===//

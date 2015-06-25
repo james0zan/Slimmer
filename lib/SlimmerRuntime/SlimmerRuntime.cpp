@@ -2,6 +2,50 @@
 #include "SlimmerUtil.h"
 
 #include <atomic>
+#include <semaphore.h>
+#include <thread>
+#include <vector>
+
+//===----------------------------------------------------------------------===//
+//                        Semaphore
+//===----------------------------------------------------------------------===//
+
+class Semaphore {
+public:
+  Semaphore() {}
+  ~Semaphore() {
+    sem_destroy(&m_sema);
+  }
+
+  inline void init(int initialCount = 0) {
+    assert(initialCount >= 0);
+    sem_init(&m_sema, 0, initialCount);
+  }
+    
+
+  inline void wait() {
+    int rc;
+    do {
+      rc = sem_wait(&m_sema);
+    } while (rc == -1 && errno == EINTR);
+  }
+
+  inline void signal() {
+    sem_post(&m_sema);
+  }
+
+  inline void signal(int count) {
+    while (count-- > 0) {
+      sem_post(&m_sema);
+    }
+  }
+
+private:
+  sem_t m_sema;
+
+  Semaphore(const Semaphore& other) = delete;
+  Semaphore& operator=(const Semaphore& other) = delete;
+};
 
 //===----------------------------------------------------------------------===//
 //                        Trace Event Buffer
@@ -10,93 +54,171 @@
 class CircularBuffer {
 public:
   void Init(const char *name);
-  void CloseBufferFile();
   ~CircularBuffer() { CloseBufferFile(); }
+
   char* StartAppend(size_t length);
   void EndAppend();
 
-private:
-  bool inited;
-  char *buffer, *compressed;
-  int fd;
-
-  size_t size; // Size of the event buffer in bytes
-  size_t offset;
-  std::atomic_flag append_lock = ATOMIC_FLAG_INIT;
-
   void Dump(const char *start, uint64_t length);
+  void CloseBufferFile();
+
+  size_t size; // Size of the each buffer in bytes
+  char *buffer[COMPRESS_BLOCK_CNT], *compressed[COMPRESS_BLOCK_CNT];
+  Semaphore empty_buffer[COMPRESS_BLOCK_CNT], empty_compressed[COMPRESS_BLOCK_CNT];
+  Semaphore filled_buffer[COMPRESS_BLOCK_CNT], filled_compressed[COMPRESS_BLOCK_CNT];
+  int after_compressed[COMPRESS_BLOCK_CNT];
+  volatile bool dump_done, compress_done;
+
+private:
+  std::atomic_bool inited;
+  FILE* stream;
+
+  int cur_block; // The block ID that is currently writed
+  size_t offset;
+
+  std::thread *dump_thread, *compress_thread;
+  
+  std::atomic_flag append_lock = ATOMIC_FLAG_INIT;
 };
+
+
+/// Compressing the trace log
+///
+void CompressTrace(CircularBuffer *cb) {
+  while (!cb->compress_done) {
+    for (int i = 0; i < COMPRESS_BLOCK_CNT && !cb->compress_done; ++i) {
+      cb->filled_buffer[i].wait();
+      cb->empty_compressed[i].wait();
+
+      cb->after_compressed[i] = 
+        LZ4_compress_limitedOutput(
+          (const char *)cb->buffer[i], 
+          (char *)cb->compressed[i],
+          cb->size, LZ4_compressBound(cb->size));
+      
+      cb->filled_compressed[i].signal();
+      cb->empty_buffer[i].signal();
+    }
+  }
+}
+
+/// Dumping the compressed log
+///
+void DumpCompressed(CircularBuffer *cb) {
+  while (!cb->dump_done) {
+    for (int i = 0; i < COMPRESS_BLOCK_CNT && !cb->dump_done; ++i) {
+      cb->filled_compressed[i].wait();
+
+      cb->Dump(cb->compressed[i], cb->after_compressed[i]);
+
+      cb->empty_compressed[i].signal();
+    }
+  }
+}
 
 /// Init a buffer for buffering the trace.
 ///
 /// \param name - the path to the trace file.
 ///
 void CircularBuffer::Init(const char *name) {
-  size = 16lu*1024lu*1024;
+  size = COMPRESS_BLOCK_SIZE;
   
-  buffer = (char *)malloc(size);
-  compressed = (char *)malloc(LZ4_compressBound(size));
-  assert(buffer && compressed && "Failed to malloc the event bufffer!\n");
+  for (int i = 0; i < COMPRESS_BLOCK_CNT; ++i) {
+    buffer[i] = (char *)malloc(size);
+    compressed[i] = (char *)malloc(LZ4_compressBound(size));
+    assert(buffer[i] && compressed[i] && "Failed to malloc the event bufffer!\n");
 
-  fd = open(name, O_RDWR | O_CREAT | O_TRUNC, 0640u);
-  assert(fd != -1 && "Failed to open tracing file!\n");
+    empty_buffer[i].init(i != 0);
+    empty_compressed[i].init(1);
+
+    filled_buffer[i].init();
+    filled_compressed[i].init();
+  }
+
+  dump_thread = new std::thread(DumpCompressed, this);
+  compress_thread = new std::thread(CompressTrace, this);
+  
+  stream = fopen(name, "wb");
+  assert(stream && "Failed to open tracing file!\n");
   
   DEBUG("[SLIMMER] Opened trace file: %s\n", name);
 
   // Initialize all of the other fields.
-  offset = 0;
+  cur_block = offset = 0;
   append_lock.clear(std::memory_order_release);
+  dump_done = compress_done = false;
   inited = true;
 }
 
 /// Flush all the buffered log into the file,
 /// and then close the file.
 ///
-__attribute__((always_inline))
 void CircularBuffer::CloseBufferFile() {
   if (!inited) return;
+
   DEBUG("[SLIMMER] Writing buffered data to trace file and closing.\n");
   
-  int after_compress = LZ4_compress_limitedOutput((const char *)buffer, (char *)compressed, offset, LZ4_compressBound(size));
-  Dump(compressed, after_compress);
-  
-  // Dump(buffer, offset);
+  *StartAppend(1) = EndEventLabel;
+  EndAppend();
 
-  // Create an end event to terminate the log.
-  while (write(fd, &EndEventLabel, sizeof(EndEventLabel)) != 1);
-  close(fd);
+  dump_done = compress_done = true;
+  filled_buffer[cur_block].signal();
+ 
+  
+  compress_thread->join();
+  dump_thread->join(); 
+
+  fclose(stream);
   inited = false;
+  append_lock.clear(std::memory_order_release);
+  for (int i = 0; i < COMPRESS_BLOCK_CNT; ++i) {
+    free(buffer[i]);
+    free(compressed[i]);
+  }
 }
 
-__attribute__((always_inline))
-char* CircularBuffer::StartAppend(size_t length) {
+/// Declare an appending of event.
+///
+/// \param length - the length of the event.
+/// \return - the starting address of the event.
+///
+inline char* CircularBuffer::StartAppend(size_t length) {
   while (append_lock.test_and_set(std::memory_order_acquire));
 
+  // If the current block is full
   if (offset + length > size) {
-    int after_compress = LZ4_compress_limitedOutput((const char *)buffer, (char *)compressed, offset, LZ4_compressBound(size));
-    Dump(compressed, after_compress);
+    memset(buffer[cur_block] + offset, PlaceHolderLabel, size - offset);
+    filled_buffer[cur_block++].signal();
 
-    // Dump(buffer, offset);
+    if (cur_block == COMPRESS_BLOCK_CNT) cur_block = 0;
+    empty_buffer[cur_block].wait();
     offset = 0;
   }
-  char *ret = buffer + offset;
+
+  char *ret = buffer[cur_block] + offset;
   offset += length;
   return ret;
 }
 
-__attribute__((always_inline))
-void CircularBuffer::EndAppend() {
+/// Declare an appending of event is ended.
+///
+inline void CircularBuffer::EndAppend() {
   append_lock.clear(std::memory_order_release);
 }
 
-__attribute__((always_inline))
-void CircularBuffer::Dump(const char *start, uint64_t length) {
-  write(fd, &length, sizeof(length));
+/// Dump log to the file.
+///
+/// \param start - the starting address of the log.
+/// \param length - the length of the log.
+///
+inline void CircularBuffer::Dump(const char *start, uint64_t length) {
+  fwrite(&length, sizeof(length), 1, stream);
   uint64_t cur = 0;;
   while (cur < length) {
-    size_t tmp = write(fd, start + cur, length - cur);
+    size_t tmp = fwrite(start + cur, 1, length - cur, stream);
     if (tmp > 0) cur += tmp;
   }
+  fwrite(&length, sizeof(length), 1, stream);
 }
 
 //===----------------------------------------------------------------------===//
@@ -104,7 +226,7 @@ void CircularBuffer::Dump(const char *start, uint64_t length) {
 //===----------------------------------------------------------------------===//
 
 // This is the very event buffer used by all record functions
-// Call EventBuffer::Init(...) before usage
+// Call CircularBuffer::Init(...) before usage
 static CircularBuffer event_buffer;
 // The thread id
 static uint64_t __thread local_tid = 0;
@@ -165,7 +287,6 @@ void recordBasicBlockEvent(uint32_t id) {
   (*(uint32_t *)(buffer + 9)) = id;
   *(buffer + 13) = BasicBlockEventLabel;
 
-  // memcpy(buffer, basic_block_event, SizeOfBasicBlockEvent);
   event_buffer.EndAppend();
 }
 
