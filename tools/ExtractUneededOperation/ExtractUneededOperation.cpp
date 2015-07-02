@@ -75,67 +75,77 @@ void ExtractUneededOperation(char *trace_file_name, char *output_file_name) {
   set<DynamicInst> impactful_call_ins, mem_depended;
   set<pair<uint64_t, uint32_t> > needed;
 
-  for (int64_t cur = trace.size() - 1; cur > 0;) {
-    cur -= GetEvent(true, &data[cur], event_label, tid_ptr, id_ptr, addr_ptr, length_ptr);
-    if (event_label == ReturnEventLabel) {
-      auto dyn_fun_call = make_tuple(*tid_ptr, *addr_ptr, -FunCount[make_pair(*tid_ptr, *addr_ptr)]);
-      if (ImpactfulFunCall.count(dyn_fun_call)) {
-        impactful_call_ins.insert(DynamicInst(*tid_ptr, *id_ptr, -InstCount[I(*tid_ptr, *id_ptr)]));
-        ImpactfulFunCall.erase(dyn_fun_call);
-      }
-      FunCount[I(*tid_ptr, *addr_ptr)]++;
-    } else if (event_label == BasicBlockEventLabel) {
-      bool used = false;
-      for (int _ = BB2Ins[*id_ptr].size() - 1; _ >= 0; --_) {
-        int ins_id = BB2Ins[*id_ptr][_];
-        DynamicInst dyn_ins(*tid_ptr, ins_id, -InstCount[I(*tid_ptr, ins_id)]);
+  // TODO: Arg, Last return
+  char *buffer = (char *)malloc(COMPRESS_BLOCK_SIZE);
+  for (int64_t _ = trace.size(); _ > 0;) {
+    _ -= sizeof(uint64_t);
+    uint64_t length = (*(uint64_t *)(&data[_]));
+    _ -= length;
 
-        bool is_needed = (needed.count(I(*tid_ptr, ins_id)) > 0);
-        // Impactful function call
-        is_needed |= (Ins[ins_id].Type == InstInfo::CallInst) && (impactful_call_ins.count(dyn_ins) > 0);
-        impactful_call_ins.erase(dyn_ins);
-        // Contol depended
-        is_needed |= (Ins[ins_id].Type == InstInfo::TerminatorInst) && (used_successor.count(*tid_ptr) > 0);
-        // Memory depended
-        is_needed |= (mem_depended.count(dyn_ins) > 0);
-        mem_depended.erase(dyn_ins);
+    uint64_t decoded = LZ4_decompress_safe ((const char*) &data[_], buffer, length, COMPRESS_BLOCK_SIZE);
+    for (int64_t cur = decoded - 1; cur > 0;) {
+      cur -= GetEvent(true, buffer + cur, event_label, tid_ptr, id_ptr, addr_ptr, length_ptr);
+      if (event_label == ReturnEventLabel) {
+        auto dyn_fun_call = make_tuple(*tid_ptr, *addr_ptr, -FunCount[make_pair(*tid_ptr, *addr_ptr)]);
+        if (ImpactfulFunCall.count(dyn_fun_call)) {
+          impactful_call_ins.insert(DynamicInst(*tid_ptr, *id_ptr, -InstCount[I(*tid_ptr, *id_ptr)]));
+          ImpactfulFunCall.erase(dyn_fun_call);
+        }
+        FunCount[I(*tid_ptr, *addr_ptr)]++;
+      } else if (event_label == BasicBlockEventLabel) {
+        bool used = false;
+        for (int _ = BB2Ins[*id_ptr].size() - 1; _ >= 0; --_) {
+          int ins_id = BB2Ins[*id_ptr][_];
+          DynamicInst dyn_ins(*tid_ptr, ins_id, -InstCount[I(*tid_ptr, ins_id)]);
 
-        if (!is_needed) {
-          printf("The last %d-th execution of\n  instruction %d, %s\n  from thread %lu is uneeded.\n",
-            InstCount[I(*tid_ptr, ins_id)], ins_id, Ins[ins_id].Code.c_str(), *tid_ptr);
-        } else {
-          used = true;
-          needed.erase(I(*tid_ptr, ins_id));
-          
-          printf("The last %d-th execution of\n  instruction %d, %s\n  from thread %lu is depended on:\n",
-            dyn_ins.Cnt, dyn_ins.ID, Ins[dyn_ins.ID].Code.c_str(), dyn_ins.TID);
+          bool is_needed = (needed.count(I(*tid_ptr, ins_id)) > 0);
+          // Impactful function call
+          is_needed |= (Ins[ins_id].Type == InstInfo::CallInst) && (impactful_call_ins.count(dyn_ins) > 0);
+          impactful_call_ins.erase(dyn_ins);
+          // Contol depended
+          is_needed |= (Ins[ins_id].Type == InstInfo::TerminatorInst) && (used_successor.count(*tid_ptr) > 0);
+          // Memory depended
+          is_needed |= (mem_depended.count(dyn_ins) > 0);
+          mem_depended.erase(dyn_ins);
 
-          // SSA dependencies
-          for (auto dep: Ins[ins_id].SSADependencies) {
-            if (dep.first == InstInfo::Inst) {
-              printf("  * the last execution of\n\tinstruction %d, %s\n\tfrom thread %lu\n",
-                dep.second, Ins[dep.second].Code.c_str(), *tid_ptr);
-              needed.insert(I(*tid_ptr, dep.second));
-            } else if (dep.first == InstInfo::Arg) {
-              // TODO
+          if (!is_needed) {
+            printf("!!!The last %d-th execution of\n  instruction %d, %s\n  from thread %lu is uneeded.\n",
+              InstCount[I(*tid_ptr, ins_id)], ins_id, Ins[ins_id].Code.c_str(), *tid_ptr);
+          } else {
+            used = true;
+            needed.erase(I(*tid_ptr, ins_id));
+            
+            printf("The last %d-th execution of\n  instruction %d, %s\n  from thread %lu is depended on:\n",
+              dyn_ins.Cnt, dyn_ins.ID, Ins[dyn_ins.ID].Code.c_str(), dyn_ins.TID);
+
+            // SSA dependencies
+            for (auto dep: Ins[ins_id].SSADependencies) {
+              if (dep.first == InstInfo::Inst) {
+                printf("  * the last execution of\n\tinstruction %d, %s\n\tfrom thread %lu\n",
+                  dep.second, Ins[dep.second].Code.c_str(), *tid_ptr);
+                needed.insert(I(*tid_ptr, dep.second));
+              } else if (dep.first == InstInfo::Arg) {
+                // TODO
+              }
+            }
+            // Memory dependencies
+            for (auto dep: MemDependencies[dyn_ins]) {
+              mem_depended.insert(dep);
+              printf("  * the last %d-th execution of\n\tinstruction %d, %s\n\tfrom thread %lu\n",
+                  dep.Cnt, dep.ID, Ins[dep.ID].Code.c_str(), dep.TID);
             }
           }
-          // Memory dependencies
-          for (auto dep: MemDependencies[dyn_ins]) {
-            mem_depended.insert(dep);
-            printf("  * the last %d-th execution of\n\tinstruction %d, %s\n\tfrom thread %lu\n",
-                dep.Cnt, dep.ID, Ins[dep.ID].Code.c_str(), dep.TID);
-          }
+          InstCount[I(*tid_ptr, ins_id)]++;
         }
-        InstCount[I(*tid_ptr, ins_id)]++;
-      }
-      // A basic block is used if at least one of its instruction is used
-      if (used) {
-        used_successor.insert(*tid_ptr);
-      } else {
-        used_successor.erase(*tid_ptr);
+        // A basic block is used if at least one of its instruction is used
+        if (used) {
+          used_successor.insert(*tid_ptr);
+        } else {
+          used_successor.erase(*tid_ptr);
+        }
       }
     }
+    _ -= sizeof(uint64_t);
   }
 }
 

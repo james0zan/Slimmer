@@ -159,6 +159,7 @@ void CircularBuffer::CloseBufferFile() {
   DEBUG("[SLIMMER] Writing buffered data to trace file and closing.\n");
   
   *StartAppend(1) = EndEventLabel;
+  memset(buffer[cur_block] + offset, PlaceHolderLabel, size - offset);
   EndAppend();
 
   dump_done = compress_done = true;

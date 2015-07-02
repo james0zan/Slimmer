@@ -119,55 +119,65 @@ void ExtractMemoryDependency(char *trace_file_name, char *output_file_name) {
   char event_label;
   const uint64_t *tid_ptr, *length_ptr, *addr_ptr;
   const uint32_t *id_ptr;
-  
-  for (int64_t cur = 0; cur < trace.size();) {
-    cur += GetEvent(false, &data[cur], event_label, tid_ptr, id_ptr, addr_ptr, length_ptr);
-    if (event_label == MemoryEventLabel) {
-      if (Ins[*id_ptr].Type == InstInfo::StoreInst) {
-        DynamicInst dyn_inst = DynamicInst(*tid_ptr, *id_ptr, InstCount[I(*tid_ptr, *id_ptr)]++);
-        Addr2LastStore->Set(*addr_ptr, *addr_ptr + *length_ptr, dyn_inst);
-      } else {
+    
+  bool ended = false;
+  char *buffer = (char *)malloc(COMPRESS_BLOCK_SIZE);
+  for (size_t _ = 0; !ended && _ < trace.size();) {
+    uint64_t length = (*(uint64_t *)(&data[_]));
+    _ += sizeof(uint64_t);
+
+    uint64_t decoded = LZ4_decompress_safe ((const char*) &data[_], buffer, length, COMPRESS_BLOCK_SIZE);
+    for (uint64_t cur = 0; !ended && cur < decoded;) {
+      cur += GetEvent(false, buffer + cur, event_label, tid_ptr, id_ptr, addr_ptr, length_ptr);
+      if (event_label == MemoryEventLabel) {
+        if (Ins[*id_ptr].Type == InstInfo::StoreInst) {
+          DynamicInst dyn_inst = DynamicInst(*tid_ptr, *id_ptr, InstCount[I(*tid_ptr, *id_ptr)]++);
+          Addr2LastStore->Set(*addr_ptr, *addr_ptr + *length_ptr, dyn_inst);
+        } else {
+          DynamicInst dyn_inst = DynamicInst(*tid_ptr, *id_ptr, InstCount[I(*tid_ptr, *id_ptr)]++);
+          printf("The %d-th execution of\n\tinstruction %d, %s\n\tfrom thread %lu is depended on:\n",
+            dyn_inst.Cnt, dyn_inst.ID, Ins[dyn_inst.ID].Code.c_str(), dyn_inst.TID);
+
+          for (auto j: Addr2LastStore->Collect(*addr_ptr, *addr_ptr + *length_ptr)) {
+            if (j.type == COVERED_SEGMENT) {
+              printf("\t* the %d-th execution of\n\t  instruction %d, %s\n\t  from thread %lu\n",
+                j.value.Cnt, j.value.ID, Ins[j.value.ID].Code.c_str(), j.value.TID);
+              fprintf(output_file, "%lu %d %d %lu %d %d\n",
+                dyn_inst.TID, dyn_inst.ID, dyn_inst.Cnt,
+                j.value.TID, j.value.ID, j.value.Cnt);
+            }
+          }
+        }
+      } else if (event_label == ArgumentEventLabel) {
+        int group_id;
+        if (Addr2Group->Get(*addr_ptr, group_id))
+          ArgGroup[*tid_ptr].insert(group_id);
+      } else if (event_label == ReturnEventLabel) {
         DynamicInst dyn_inst = DynamicInst(*tid_ptr, *id_ptr, InstCount[I(*tid_ptr, *id_ptr)]++);
         printf("The %d-th execution of\n\tinstruction %d, %s\n\tfrom thread %lu is depended on:\n",
-          dyn_inst.Cnt, dyn_inst.ID, Ins[dyn_inst.ID].Code.c_str(), dyn_inst.TID);
-
-        for (auto j: Addr2LastStore->Collect(*addr_ptr, *addr_ptr + *length_ptr)) {
-          if (j.type == COVERED_SEGMENT) {
-            printf("\t* the %d-th execution of\n\t  instruction %d, %s\n\t  from thread %lu\n",
-              j.value.Cnt, j.value.ID, Ins[j.value.ID].Code.c_str(), j.value.TID);
-            fprintf(output_file, "%lu %d %d %lu %d %d\n",
-              dyn_inst.TID, dyn_inst.ID, dyn_inst.Cnt,
-              j.value.TID, j.value.ID, j.value.Cnt);
-          }
-        }
-      }
-    } else if (event_label == ArgumentEventLabel) {
-      int group_id;
-      if (Addr2Group->Get(*addr_ptr, group_id))
-        ArgGroup[*tid_ptr].insert(group_id);
-    } else if (event_label == ReturnEventLabel) {
-      DynamicInst dyn_inst = DynamicInst(*tid_ptr, *id_ptr, InstCount[I(*tid_ptr, *id_ptr)]++);
-      printf("The %d-th execution of\n\tinstruction %d, %s\n\tfrom thread %lu is depended on:\n",
-          dyn_inst.Cnt, dyn_inst.ID, Ins[dyn_inst.ID].Code.c_str(), dyn_inst.TID);
-      for (auto group_id: ArgGroup[*tid_ptr]) {
-        for (auto i: Group2Addr[group_id]->Collect(0, SegmentTree<int>::MAX_RANGE)) {
-          if (i.type == COVERED_SEGMENT) {
-            for (auto j: Addr2LastStore->Collect(i.left, i.right)) {
-              if (j.type == COVERED_SEGMENT) {
-                printf("\t* the %d-th execution of\n\t  instruction %d, %s\n\t  from thread %lu\n",
-                  j.value.Cnt, j.value.ID, Ins[j.value.ID].Code.c_str(), j.value.TID);
-                fprintf(output_file, "%lu %d %d %lu %d %d\n",
-                  dyn_inst.TID, dyn_inst.ID, dyn_inst.Cnt,
-                  j.value.TID, j.value.ID, j.value.Cnt);
+            dyn_inst.Cnt, dyn_inst.ID, Ins[dyn_inst.ID].Code.c_str(), dyn_inst.TID);
+        for (auto group_id: ArgGroup[*tid_ptr]) {
+          for (auto i: Group2Addr[group_id]->Collect(0, SegmentTree<int>::MAX_RANGE)) {
+            if (i.type == COVERED_SEGMENT) {
+              for (auto j: Addr2LastStore->Collect(i.left, i.right)) {
+                if (j.type == COVERED_SEGMENT) {
+                  printf("\t* the %d-th execution of\n\t  instruction %d, %s\n\t  from thread %lu\n",
+                    j.value.Cnt, j.value.ID, Ins[j.value.ID].Code.c_str(), j.value.TID);
+                  fprintf(output_file, "%lu %d %d %lu %d %d\n",
+                    dyn_inst.TID, dyn_inst.ID, dyn_inst.Cnt,
+                    j.value.TID, j.value.ID, j.value.Cnt);
+                }
               }
+              Addr2LastStore->Set(i.left, i.right, dyn_inst);
             }
-            Addr2LastStore->Set(i.left, i.right, dyn_inst);
           }
         }
+        ArgGroup.erase(*tid_ptr);  
       }
-      ArgGroup.erase(*tid_ptr);  
     }
+    _ += length + sizeof(uint64_t);
   }
+
   fprintf(output_file, "0 -1 -1 0 -1 -1\n");
   for (auto i: InstCount) {
     printf("Thread %lu has executed instruction %d %d-th\n", i.first.first, i.first.second, i.second);
@@ -195,62 +205,78 @@ void GroupMemory(char *trace_file_name, char *output_file_name) {
   const uint32_t *id_ptr;
   
   set<int> shoud_merge;
-  for (int64_t cur = trace.size() - 1; cur > 0;) {
-    cur -= GetEvent(true, &data[cur], event_label, tid_ptr, id_ptr, addr_ptr, length_ptr);
-    if (event_label == MemoryEventLabel) {
-      shoud_merge.clear();
-      vector<pair<uint64_t, uint64_t> > ranges;
-      for (auto i: Collect(*addr_ptr, (*addr_ptr) + (*length_ptr))) {
-        if (i.type == EMPTY_SEGMENT) {
-          ranges.push_back(make_pair(i.left, i.right));
-        } else {
-          shoud_merge.insert(i.value);
-        }
-      }
-        
-      int new_group = Merging(shoud_merge);
-      for (auto i: ranges) {
-        Group2Addr[new_group]->Set(i.first, i.second, 1);
-        Addr2Group->Set(i.first, i.second, new_group);
-      }
-        
-      int pointer_id = (Ins[*id_ptr].Type == InstInfo::LoadInst ? Ins[*id_ptr].SSADependencies[0].second : Ins[*id_ptr].SSADependencies[1].second);
-      // printf("=====\nSet %d %p %p to %d\n", pointer_id, (void*)*addr_ptr, (void*)((*addr_ptr) + (*length_ptr)), new_group);
-      auto ins = I(*tid_ptr, pointer_id);
-      if (Ins2Group.count(ins)) Group2Ins[Ins2Group[ins]].erase(ins);
-      Ins2Group[ins] = new_group; Group2Ins[new_group].insert(ins);
-    } else if (event_label == BasicBlockEventLabel) {
-      for (int _ = BB2Ins[*id_ptr].size() - 1; _ >= 0; --_) {
-        int ins_id = BB2Ins[*id_ptr][_];
-        if (!Ins[ins_id].IsPointer) continue;
-        if (Ins[ins_id].Type == InstInfo::CallInst) continue;
 
-        // Merging
+  bool ended = false;
+  char *buffer = (char *)malloc(COMPRESS_BLOCK_SIZE);
+  for (int64_t _ = trace.size(); _ > 0;) {
+    _ -= sizeof(uint64_t);
+    uint64_t length = (*(uint64_t *)(&data[_]));
+    _ -= length;
+
+    uint64_t decoded = LZ4_decompress_safe ((const char*) &data[_], buffer, length, COMPRESS_BLOCK_SIZE);
+    for (int64_t cur = decoded - 1; cur > 0;) {
+      cur -= GetEvent(true, buffer + cur, event_label, tid_ptr, id_ptr, addr_ptr, length_ptr);
+      if (event_label == MemoryEventLabel) {
         shoud_merge.clear();
-        auto ins = I(*tid_ptr, ins_id);
-        if (Ins2Group.count(ins)) shoud_merge.insert(Ins2Group[ins]);
-        for (auto dep: Ins[ins_id].SSADependencies) {
-          if (!(dep.first == InstInfo::Inst && Ins[dep.second].IsPointer)) continue;
-          pair<uint64_t, uint32_t> dependent_ins = I(*tid_ptr, dep.second);
-          if (Ins2Group.count(dependent_ins)) shoud_merge.insert(Ins2Group[dependent_ins]);
+        vector<pair<uint64_t, uint64_t> > ranges;
+        for (auto i: Collect(*addr_ptr, (*addr_ptr) + (*length_ptr))) {
+          if (i.type == EMPTY_SEGMENT) {
+            ranges.push_back(make_pair(i.left, i.right));
+          } else {
+            shoud_merge.insert(i.value);
+          }
         }
+          
         int new_group = Merging(shoud_merge);
-        // printf("=====\nID: %d, %s\nMerge", ins_id, Ins[ins_id].Code.c_str());
-        // for (auto i: shoud_merge) printf(" %d", i);
-        // printf(" to %d\n", new_group);
-        
-        // Clear old groups
-        for (auto dep: Ins[ins_id].SSADependencies) {
-          if (!(dep.first == InstInfo::Inst && Ins[dep.second].IsPointer)) continue;
-          auto dependent_ins = I(*tid_ptr, dep.second);
-          Ins2Group[dependent_ins] = new_group;
-          Group2Ins[new_group].insert(dependent_ins);
-          // printf("Set %d to %d\n", dep.second, new_group);
+        for (auto i: ranges) {
+          Group2Addr[new_group]->Set(i.first, i.second, 1);
+          Addr2Group->Set(i.first, i.second, new_group);
         }
-        Group2Ins[Ins2Group[ins]].erase(ins);
-        Ins2Group.erase(ins);
+        
+        auto pointer_type = (Ins[*id_ptr].Type == InstInfo::LoadInst ? Ins[*id_ptr].SSADependencies[0].first : Ins[*id_ptr].SSADependencies[1].first);
+        if (pointer_type == InstInfo::Inst) {
+          int pointer_id = (Ins[*id_ptr].Type == InstInfo::LoadInst ? Ins[*id_ptr].SSADependencies[0].second : Ins[*id_ptr].SSADependencies[1].second);
+          // printf("=====\nSet %d, %s\n%d, %s\n%p %p to %d\n", *id_ptr, Ins[*id_ptr].Code.c_str(), pointer_id, Ins[pointer_id].Code.c_str(), (void*)*addr_ptr, (void*)((*addr_ptr) + (*length_ptr)), new_group);
+          auto ins = I(*tid_ptr, pointer_id);
+          if (Ins2Group.count(ins)) Group2Ins[Ins2Group[ins]].erase(ins);
+          Ins2Group[ins] = new_group; Group2Ins[new_group].insert(ins);
+        } else if (pointer_type == InstInfo::Arg) {
+          //TODO
+        }
+      } else if (event_label == BasicBlockEventLabel) {
+        for (int _ = BB2Ins[*id_ptr].size() - 1; _ >= 0; --_) {
+          int ins_id = BB2Ins[*id_ptr][_];
+          if (!Ins[ins_id].IsPointer) continue;
+          if (Ins[ins_id].Type == InstInfo::CallInst) continue;
+
+          // Merging
+          shoud_merge.clear();
+          auto ins = I(*tid_ptr, ins_id);
+          if (Ins2Group.count(ins)) shoud_merge.insert(Ins2Group[ins]);
+          for (auto dep: Ins[ins_id].SSADependencies) {
+            if (!(dep.first == InstInfo::Inst && Ins[dep.second].IsPointer)) continue;
+            pair<uint64_t, uint32_t> dependent_ins = I(*tid_ptr, dep.second);
+            if (Ins2Group.count(dependent_ins)) shoud_merge.insert(Ins2Group[dependent_ins]);
+          }
+          int new_group = Merging(shoud_merge);
+          // printf("=====\nID: %d, %s\nMerge", ins_id, Ins[ins_id].Code.c_str());
+          // for (auto i: shoud_merge) printf(" %d", i);
+          // printf(" to %d\n", new_group);
+          
+          // Clear old groups
+          for (auto dep: Ins[ins_id].SSADependencies) {
+            if (!(dep.first == InstInfo::Inst && Ins[dep.second].IsPointer)) continue;
+            auto dependent_ins = I(*tid_ptr, dep.second);
+            Ins2Group[dependent_ins] = new_group;
+            Group2Ins[new_group].insert(dependent_ins);
+            // printf("Set %d to %d\n", dep.second, new_group);
+          }
+          Group2Ins[Ins2Group[ins]].erase(ins);
+          Ins2Group.erase(ins);
+        }
       }
     }
+    _ -= sizeof(uint64_t);
   }
 
   auto cur = Addr2Group->Collect(0, SegmentTree<int>::MAX_RANGE);

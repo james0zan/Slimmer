@@ -129,7 +129,7 @@ public:
 private:
   bool inited;
   char *buffer, *compressed;
-  int fd;
+  FILE* stream;
   size_t offset;
   size_t size; // Size of the event buffer in bytes
   // the mutex of modifying the EntryBuffer

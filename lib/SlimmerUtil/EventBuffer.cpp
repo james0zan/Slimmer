@@ -21,19 +21,16 @@ const float LOAD_FACTOR = 0.2;
 ///
 /// \param name - the path to the trace file.
 ///
-void EventBuffer::Init(const char *name) {
-  long pages = sysconf(_SC_PHYS_PAGES);
-  long page_size = sysconf(_SC_PAGE_SIZE);
-  
-  size = 16*1024*1024;//((uint64_t)(pages * LOAD_FACTOR)) * page_size;
+void EventBuffer::Init(const char *name) {  
+  size = COMPRESS_BLOCK_SIZE;
   
   buffer = (char *)malloc(size);
   compressed = (char *)malloc(LZ4_compressBound(size));
   assert(buffer && compressed && "Failed to malloc the event bufffer!\n");
 
-  fd = open(name, O_RDWR | O_CREAT | O_TRUNC, 0640u);
-  assert(fd != -1 && "Failed to open tracing file!\n");
-  
+  stream = fopen(name, "wb");
+  assert(stream && "Failed to open tracing file!\n");
+
   DEBUG("[SLIMMER] Opened trace file: %s\n", name);
 
   // Initialize all of the other fields.
@@ -54,14 +51,15 @@ void EventBuffer::CloseBufferFile() {
   // Create an end event to terminate the log.
   Append(&EndEventLabel, sizeof(EndEventLabel));
 
-  int after_compress = LZ4_compress_limitedOutput((const char *)buffer, (char *)compressed, offset, LZ4_compressBound(size));
-  write(fd, &after_compress, sizeof(after_compress));
-  // fprintf(stderr, "1. Before %lu After %lu %lf\n", offset, after_compress, (double)offset/after_compress);
+  uint64_t after_compress = LZ4_compress_limitedOutput((const char *)buffer, (char *)compressed, offset, LZ4_compressBound(size));
+  fwrite(&after_compress, sizeof(after_compress), 1, stream);
+  fprintf(stderr, "1. Before %lu After %lu %lf\n", offset, after_compress, (double)offset/after_compress);
   size_t cur = 0;
   while (cur < after_compress) {
-    size_t tmp = write(fd, compressed + cur, after_compress - cur);
+    size_t tmp = fwrite(compressed + cur, 1, after_compress - cur, stream);
     if (tmp > 0) cur += tmp;
   }
+  fwrite(&after_compress, sizeof(after_compress), 1, stream);
   
   // size_t cur = 0;
   // while (cur < offset) {
@@ -69,7 +67,7 @@ void EventBuffer::CloseBufferFile() {
   //   if (tmp > 0) cur += tmp;
   // }
 
-  close(fd);
+  fclose(stream);
   pthread_spin_destroy(&lock);
   inited = false;
 }
@@ -82,14 +80,15 @@ void EventBuffer::CloseBufferFile() {
 __attribute__((always_inline))
 void EventBuffer::Append(const char *event, size_t length) {
   if (offset + length > size) {
-    int after_compress = LZ4_compress_limitedOutput((const char *)buffer, (char *)compressed, offset, LZ4_compressBound(size));
-    write(fd, &after_compress, sizeof(after_compress));
-    // fprintf(stderr, "2. Before %lu After %lu %lf\n", offset, after_compress, (double)offset/after_compress);
+    uint64_t after_compress = LZ4_compress_limitedOutput((const char *)buffer, (char *)compressed, offset, LZ4_compressBound(size));
+    fwrite(&after_compress, sizeof(after_compress), 1, stream);
+    fprintf(stderr, "2. Before %lu After %lu %lf\n", offset, after_compress, (double)offset/after_compress);
     size_t cur = 0;
     while (cur < after_compress) {
-      size_t tmp = write(fd, compressed + cur, after_compress - cur);
+      size_t tmp = fwrite(compressed + cur, 1, after_compress - cur, stream);
       if (tmp > 0) cur += tmp;
     }
+    fwrite(&after_compress, sizeof(after_compress), 1, stream);
 
     // size_t cur = 0;
     // while (cur < offset) {

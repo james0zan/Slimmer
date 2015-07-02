@@ -1,6 +1,6 @@
 #include <stdio.h>
 
-char *format = "%d %d %p %p\n";
+const char *format = "%d %d %p %p\n";
 struct X {
   int a, b;
 };
@@ -11,7 +11,8 @@ int main(void) {
   tmp.b = 2;
   int c = 1;
   printf(format, tmp.a, tmp.b, format, &tmp);
-  // int a = 1;
-  // printf("%d\n", a);
+  
+  int a = 1;
+  printf("%d\n", a);
 }
 
