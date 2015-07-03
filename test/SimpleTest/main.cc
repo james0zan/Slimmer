@@ -6,7 +6,6 @@ struct X {
 };
 
 void Foo(X* tmp) {
-  printf("%p\n", tmp);
   tmp->b = 2;
 }
 
@@ -14,7 +13,7 @@ int main(void) {
   X tmp;
   tmp.a = 1;
   Foo(&tmp);
-  int c = 1;
+  // int c = 1;
   printf(format, tmp.a, format, &tmp);
   
   // int a = 1;

@@ -3,6 +3,7 @@
 
 #include "SlimmerUtil.h"
 
+#include <algorithm>
 #include <stack>
 #include <boost/iostreams/device/mapped_file.hpp>
 
@@ -183,6 +184,8 @@ struct SmallestBlock {
     for (uint32_t i = 0; i < addr_size; ++i) {
       cur -= 8; Addr.push_back(*(uint64_t *)(&data[cur]));
     }
+    reverse(Addr.begin(),Addr.end()); 
+    
     cur -= 4; Caller = (*(uint32_t *)(&data[cur])); 
     cur -= 1; IsFirst = (*(uint8_t *)(&data[cur])); 
     cur -= 4; End = (*(uint32_t *)(&data[cur])); 

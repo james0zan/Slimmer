@@ -46,7 +46,9 @@ void LoadInstInfo(string path, vector<InstInfo>& info, vector<vector<uint32_t> >
       file >> tmp >> x;
       if (tmp == "Inst") {
         ins.SSADependencies.push_back(make_pair(InstInfo::Inst, x));
-      } else if (tmp == "Arg") {
+      } else if (tmp == "PointerArg") {
+        ins.SSADependencies.push_back(make_pair(InstInfo::PointerArg, x));
+      }  else if (tmp == "Arg") {
         ins.SSADependencies.push_back(make_pair(InstInfo::Arg, x));
       } else {
         ins.SSADependencies.push_back(make_pair(InstInfo::Constant, x));
@@ -100,6 +102,8 @@ void LoadInstInfo(string path, vector<InstInfo>& info, vector<vector<uint32_t> >
         file >> a >> tmp >> b;
         if (tmp == "Inst") {
           ins.PhiDependencies.push_back(make_tuple(a, InstInfo::Inst, b));
+        } else if (tmp == "PointerArg") {
+          ins.PhiDependencies.push_back(make_tuple(a, InstInfo::PointerArg, b));
         } else if (tmp == "Arg") {
           ins.PhiDependencies.push_back(make_tuple(a, InstInfo::Arg, b));
         } else {

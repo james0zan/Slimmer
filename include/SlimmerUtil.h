@@ -180,6 +180,7 @@ struct InstInfo {
   enum DepType {
     Inst,
     Arg,
+    PointerArg,
     Constant
   };
   std::vector<std::pair<DepType, uint32_t> > SSADependencies;

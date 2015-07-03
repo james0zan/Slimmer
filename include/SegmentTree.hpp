@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <vector>
 
 //===----------------------------------------------------------------------===//
@@ -47,7 +48,7 @@ public:
   ///
   void Set(uint64_t l, uint64_t r, T v) {
     // assert(_v > 0); int v = (int)_v; // 0 and -1 are reserved
-    
+
     // If already covered
     if (type == COVERED_SEGMENT && value == v) return;
     

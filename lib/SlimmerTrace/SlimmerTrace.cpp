@@ -144,7 +144,11 @@ std::string SlimmerTrace::CommonInfo(Instruction *ins) {
       assert(ins2ID.count(tmp) > 0);
       rso << "Inst " << ins2ID[tmp] << " ";
     } else if (Argument *arg= dyn_cast<Argument>(ins->getOperand(index))) {
-      rso << "Arg " << arg->getArgNo() << " ";
+      if (arg->getType()->isPointerTy()) {
+        rso << "PointerArg " << arg->getArgNo() << " ";
+      } else {
+        rso << "Arg " << arg->getArgNo() << " ";
+      }
     } else { // A constant
       rso << "Constan 0 ";
     }
