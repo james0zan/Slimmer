@@ -80,7 +80,7 @@ void getInsFlow(char *inst_file, char *trace_file_name) {
   
   map<pair<uint64_t, uint64_t>, uint32_t> FunCount;
 
-  map<uint64_t, stack<StackInfo> > call_stack;
+  map<uint64_t, vector<StackInfo> > call_stack;
   map<uint64_t, set<uint64_t> > args;
   map<uint64_t, pair<uint8_t, uint32_t> > is_first;
   vector<SmallestBlock> trace;
@@ -98,9 +98,9 @@ void getInsFlow(char *inst_file, char *trace_file_name) {
         is_first[*tid_ptr] = make_pair((uint8_t)2, (uint32_t)0);
       }
       while (!call_stack[*tid_ptr].empty()) {
-        StackInfo info = call_stack[*tid_ptr].top();
+        StackInfo info = call_stack[*tid_ptr].back();
         if (info.CurIndex >= BB2Ins[info.BBID].size()) {
-          call_stack[*tid_ptr].pop();
+          call_stack[*tid_ptr].pop_back();
           is_first[*tid_ptr] = make_pair((uint8_t)0, (uint32_t)0);
         } else {
           assert(Ins[BB2Ins[info.BBID][info.CurIndex - 1]].Type == InstInfo::CallInst);
@@ -108,9 +108,9 @@ void getInsFlow(char *inst_file, char *trace_file_name) {
           break;
         }
       }
-      call_stack[*tid_ptr].push(StackInfo(*id_ptr, 0));
+      call_stack[*tid_ptr].push_back(StackInfo(*id_ptr, 0));
     } else if (event_label == MemoryEventLabel) {
-      StackInfo& info = call_stack[*tid_ptr].top();
+      StackInfo& info = call_stack[*tid_ptr].back();
       uint32_t ins_id = BB2Ins[info.BBID][info.CurIndex++];
       assert((*id_ptr) == ins_id);
 
@@ -119,7 +119,7 @@ void getInsFlow(char *inst_file, char *trace_file_name) {
       is_first[*tid_ptr] = make_pair((uint8_t)0, (uint32_t)0);
       trace.push_back(b);
     } else if (event_label == ReturnEventLabel) {
-      StackInfo& info = call_stack[*tid_ptr].top();
+      StackInfo& info = call_stack[*tid_ptr].back();
       uint32_t ins_id = BB2Ins[info.BBID][info.CurIndex++];
       assert((*id_ptr) == ins_id);
       
@@ -140,7 +140,7 @@ void getInsFlow(char *inst_file, char *trace_file_name) {
     }
 
     while (!call_stack[*tid_ptr].empty()) {
-      StackInfo& info = call_stack[*tid_ptr].top();
+      StackInfo& info = call_stack[*tid_ptr].back();
 
       uint32_t start_index = info.CurIndex, end_index;
       for (end_index = start_index; end_index < BB2Ins[info.BBID].size(); ++end_index) {
@@ -156,12 +156,6 @@ void getInsFlow(char *inst_file, char *trace_file_name) {
       if (end_index < BB2Ins[info.BBID].size() && Ins[BB2Ins[info.BBID][end_index]].Type == InstInfo::CallInst) ++end_index;
       info.CurIndex = end_index;
 
-      if (end_index > start_index) {
-        SmallestBlock b(SmallestBlock::NormalBlock, *tid_ptr, info.BBID, start_index, end_index, is_first[*tid_ptr]);
-        is_first[*tid_ptr] = make_pair((uint8_t)0, (uint32_t)0);
-        trace.push_back(b);
-      }
-      
       bool last_bb = false;
       if (info.CurIndex == BB2Ins[info.BBID].size()) {
         uint32_t last_ins_id = BB2Ins[info.BBID].back();
@@ -169,8 +163,27 @@ void getInsFlow(char *inst_file, char *trace_file_name) {
           last_bb = true;
         }
       } 
-      if (last_bb) { call_stack[*tid_ptr].pop();}
-      else break;
+
+      SmallestBlock b;
+      if (end_index > start_index) {
+        SmallestBlock b(SmallestBlock::NormalBlock, *tid_ptr, info.BBID, start_index, end_index, is_first[*tid_ptr]);
+        if (last_bb) {
+          call_stack[*tid_ptr].pop_back();
+          if (call_stack[*tid_ptr].empty()) {
+            b.IsLast = 2;
+          } else {
+            b.IsLast = 1;
+            StackInfo last_info = call_stack[*tid_ptr].back();
+            assert(last_info.CurIndex < BB2Ins[last_info.BBID].size());
+            assert(Ins[BB2Ins[last_info.BBID][last_info.CurIndex - 1]].Type == InstInfo::CallInst);
+            b.Caller = BB2Ins[last_info.BBID][last_info.CurIndex - 1];
+          }
+        }
+        is_first[*tid_ptr] = make_pair((uint8_t)0, (uint32_t)0);
+        trace.push_back(b);
+      }
+
+      if (!last_bb) break;
     }
   }
 
