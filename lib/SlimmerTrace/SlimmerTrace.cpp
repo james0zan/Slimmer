@@ -236,6 +236,17 @@ void SlimmerTrace::appendCtor(Module& module) {
   appendToGlobalCtors(module, ctor, 0);
 }
 
+bool notTraced(Instruction *ins) {
+  if (CallInst *call_ptr = dyn_cast<CallInst>(ins)) {
+    Function *called_fun = call_ptr->getCalledFunction();
+    if (called_fun->isIntrinsic()) {
+      std::string fun_name = called_fun->stripPointerCasts()->getName().str();
+      if (fun_name.substr(0, 9) == "llvm.dbg.") return true;
+    }
+  }
+  return false;
+}
+
 bool SlimmerTrace::runOnModule(Module& module) { 
   LOG(DEBUG, "SlimmerTrace::runOnModule") << "Start";
 
@@ -252,6 +263,8 @@ bool SlimmerTrace::runOnModule(Module& module) {
     for (Function::iterator bb_ptr = fun_ptr->begin(), bb_end = fun_ptr->end(); bb_ptr != bb_end; ++bb_ptr) {
       bb2ID[bb_ptr] = bb_id++;
       for (BasicBlock::iterator ins_ptr = bb_ptr->begin(), ins_end = bb_ptr->end(); ins_ptr != ins_end; ++ins_ptr) {
+        if (notTraced(ins_ptr)) continue;
+
         ins2ID[ins_ptr] = ins_id++;
         ins_list.push_back(ins_ptr);
       }
@@ -268,7 +281,11 @@ bool SlimmerTrace::runOnModule(Module& module) {
       fInst << "\tStoreInst\n";
       instrumentStoreInst(store_ptr);
     } else if (TerminatorInst *terminator_ptr = dyn_cast<TerminatorInst>(ins_ptr)) {
-      fInst << "\tTerminatorInst\n\t" << terminator_ptr->getNumSuccessors() << " ";
+      if (ReturnInst *return_ptr = dyn_cast<ReturnInst>(ins_ptr)) {
+        fInst << "\tReturnInst\n\t" << terminator_ptr->getNumSuccessors() << " ";
+      } else {
+        fInst << "\tTerminatorInst\n\t" << terminator_ptr->getNumSuccessors() << " ";
+      }
           
       // BasicBlockID of successor 1, BasicBlockID of successor 2, ...,
       for (unsigned index = 0; index < terminator_ptr->getNumSuccessors(); ++index) {
@@ -309,9 +326,12 @@ bool SlimmerTrace::runOnModule(Module& module) {
         // TODO
       } else {
         std::string fun_name = called_fun->stripPointerCasts()->getName().str();
-        fInst << "\tCallInst\n\t" << fun_name << "\n";
+        
         if (instrumentedFun.count(fun_name) == 0) {
+          fInst << "\tExternalCallInst\n\t" << fun_name << "\n";
           instrumentCallInst(call_ptr);
+        } else {
+          fInst << "\tCallInst\n\t" << fun_name << "\n";
         }
       }
     } else if (InvokeInst *invoke_ptr = dyn_cast<InvokeInst>(ins_ptr)) {
@@ -321,9 +341,11 @@ bool SlimmerTrace::runOnModule(Module& module) {
         // TODO
       } else {
         std::string fun_name = called_fun->stripPointerCasts()->getName().str();
-        fInst << "\tCallInst\n\t" << fun_name << "\n";
         if (instrumentedFun.count(fun_name) == 0) {
+          fInst << "\tExternalCallInst\n\t" << fun_name << "\n";
           // TODO
+        } else {
+          fInst << "\tCallInst\n\t" << fun_name << "\n";
         }
       }
     } else { // Normal Instruction

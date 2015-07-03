@@ -205,6 +205,7 @@ void GroupMemory(char *trace_file_name, char *output_file_name) {
   const uint32_t *id_ptr;
   
   set<int> shoud_merge;
+  map<uint64_t, set<uint32_t> > used_arg;
 
   bool ended = false;
   char *buffer = (char *)malloc(COMPRESS_BLOCK_SIZE);
@@ -233,35 +234,56 @@ void GroupMemory(char *trace_file_name, char *output_file_name) {
           Addr2Group->Set(i.first, i.second, new_group);
         }
         
-        auto pointer_type = (Ins[*id_ptr].Type == InstInfo::LoadInst ? Ins[*id_ptr].SSADependencies[0].first : Ins[*id_ptr].SSADependencies[1].first);
-        if (pointer_type == InstInfo::Inst) {
-          int pointer_id = (Ins[*id_ptr].Type == InstInfo::LoadInst ? Ins[*id_ptr].SSADependencies[0].second : Ins[*id_ptr].SSADependencies[1].second);
-          // printf("=====\nSet %d, %s\n%d, %s\n%p %p to %d\n", *id_ptr, Ins[*id_ptr].Code.c_str(), pointer_id, Ins[pointer_id].Code.c_str(), (void*)*addr_ptr, (void*)((*addr_ptr) + (*length_ptr)), new_group);
-          auto ins = I(*tid_ptr, pointer_id);
+        auto depended_pointer = (Ins[*id_ptr].Type == InstInfo::LoadInst ? Ins[*id_ptr].SSADependencies[0] : Ins[*id_ptr].SSADependencies[1]);
+        if (depended_pointer.second == InstInfo::Arg) {
+          // TODO: Fix this hack!!
+          depended_pointer.second = Ins.size() + depended_pointer.second; 
+          used_arg[*tid_ptr].insert(depended_pointer.second);
+        }
+        if (depended_pointer.first != InstInfo::Constant) {
+          printf("=====\nSet %d, %s\n%d, %s\n%p %p to %d\n", 
+            *id_ptr, Ins[*id_ptr].Code.c_str(), 
+            depended_pointer.second, Ins.size() > (depended_pointer.second) ? Ins[depended_pointer.second].Code.c_str() : "Arg", 
+            (void*)*addr_ptr, (void*)((*addr_ptr) + (*length_ptr)), 
+            new_group);
+          
+          auto ins = I(*tid_ptr, depended_pointer.second);
           if (Ins2Group.count(ins)) Group2Ins[Ins2Group[ins]].erase(ins);
           Ins2Group[ins] = new_group; Group2Ins[new_group].insert(ins);
-        } else if (pointer_type == InstInfo::Arg) {
-          //TODO
         }
       } else if (event_label == BasicBlockEventLabel) {
         for (int _ = BB2Ins[*id_ptr].size() - 1; _ >= 0; --_) {
           int ins_id = BB2Ins[*id_ptr][_];
-          if (!Ins[ins_id].IsPointer) continue;
+          if (!Ins[ins_id].IsPointer && Ins[ins_id].Type != InstInfo::StoreInst) continue;
           if (Ins[ins_id].Type == InstInfo::CallInst) continue;
 
           // Merging
+          printf("=====\nID: %d, %s\nMerge", ins_id, Ins[ins_id].Code.c_str());
+
           shoud_merge.clear();
           auto ins = I(*tid_ptr, ins_id);
-          if (Ins2Group.count(ins)) shoud_merge.insert(Ins2Group[ins]);
+          if (Ins2Group.count(ins)) {
+            shoud_merge.insert(Ins2Group[ins]);
+            printf(" %d(%d)", Ins2Group[ins], ins.second);
+          }
           for (auto dep: Ins[ins_id].SSADependencies) {
-            if (!(dep.first == InstInfo::Inst && Ins[dep.second].IsPointer)) continue;
-            pair<uint64_t, uint32_t> dependent_ins = I(*tid_ptr, dep.second);
-            if (Ins2Group.count(dependent_ins)) shoud_merge.insert(Ins2Group[dependent_ins]);
+            if (dep.first == InstInfo::Inst && Ins[dep.second].IsPointer) {
+              pair<uint64_t, uint32_t> dependent_ins = I(*tid_ptr, dep.second);
+              if (Ins2Group.count(dependent_ins)) {
+                shoud_merge.insert(Ins2Group[dependent_ins]);
+                printf(" %d(%d)", Ins2Group[dependent_ins], dependent_ins.second);
+              }
+            } else if (dep.first == InstInfo::Arg) {
+              // TODO: Fix this hack!!
+              pair<uint64_t, uint32_t> dependent_ins = I(*tid_ptr, 0 - dep.second);
+              if (Ins2Group.count(dependent_ins)) {
+                shoud_merge.insert(Ins2Group[dependent_ins]);
+                printf(" %d(%d)", Ins2Group[dependent_ins], dependent_ins.second);
+              }
+            }
           }
           int new_group = Merging(shoud_merge);
-          // printf("=====\nID: %d, %s\nMerge", ins_id, Ins[ins_id].Code.c_str());
-          // for (auto i: shoud_merge) printf(" %d", i);
-          // printf(" to %d\n", new_group);
+          printf(" to %d\n", new_group);
           
           // Clear old groups
           for (auto dep: Ins[ins_id].SSADependencies) {
@@ -274,6 +296,13 @@ void GroupMemory(char *trace_file_name, char *output_file_name) {
           Group2Ins[Ins2Group[ins]].erase(ins);
           Ins2Group.erase(ins);
         }
+        if (/*Is the first BB*/ (*id_ptr) == 0) {
+          for (auto i: used_arg[*tid_ptr]) {
+            auto ins = I(*tid_ptr, i);
+            Group2Ins[Ins2Group[ins]].erase(ins);
+            Ins2Group.erase(ins);
+          }
+        }
       }
     }
     _ -= sizeof(uint64_t);
@@ -284,7 +313,7 @@ void GroupMemory(char *trace_file_name, char *output_file_name) {
     printf("[%lx,%lx): %d %d\n", i.left, i.right, i.type, i.value);
   }
 
-  ExtractMemoryDependency(trace_file_name, output_file_name);
+  // ExtractMemoryDependency(trace_file_name, output_file_name);
 }
 
 int main(int argc, char *argv[]) {

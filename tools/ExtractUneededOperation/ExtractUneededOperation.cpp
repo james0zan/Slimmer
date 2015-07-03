@@ -70,7 +70,7 @@ void ExtractUneededOperation(char *trace_file_name, char *output_file_name) {
   const uint32_t *id_ptr;
   
   map<pair<uint64_t, uint64_t>, int32_t> FunCount;
-  map<pair<uint64_t, uint32_t>, int32_t> InstCount;
+  map<pair<uint64_t, uint32_t>, int32_t> InstCount, BBCount;
   set<uint64_t> used_successor;
   set<DynamicInst> impactful_call_ins, mem_depended;
   set<pair<uint64_t, uint32_t> > needed;
@@ -99,14 +99,22 @@ void ExtractUneededOperation(char *trace_file_name, char *output_file_name) {
           DynamicInst dyn_ins(*tid_ptr, ins_id, -InstCount[I(*tid_ptr, ins_id)]);
 
           bool is_needed = (needed.count(I(*tid_ptr, ins_id)) > 0);
-          // Impactful function call
-          is_needed |= (Ins[ins_id].Type == InstInfo::CallInst) && (impactful_call_ins.count(dyn_ins) > 0);
-          impactful_call_ins.erase(dyn_ins);
           // Contol depended
           is_needed |= (Ins[ins_id].Type == InstInfo::TerminatorInst) && (used_successor.count(*tid_ptr) > 0);
           // Memory depended
           is_needed |= (mem_depended.count(dyn_ins) > 0);
           mem_depended.erase(dyn_ins);
+
+          if (Ins[ins_id].Type == InstInfo::CallInst) {
+            // Impactful function call
+            is_needed |= (impactful_call_ins.count(dyn_ins) > 0);
+            impactful_call_ins.erase(dyn_ins);
+
+            // Used function call
+            // is_needed |= (used_call_ins.count(dyn_ins) > 0);
+            // used_call_ins.erase(dyn_ins);
+          }
+          
 
           if (!is_needed) {
             printf("!!!The last %d-th execution of\n  instruction %d, %s\n  from thread %lu is uneeded.\n",
@@ -134,15 +142,19 @@ void ExtractUneededOperation(char *trace_file_name, char *output_file_name) {
               printf("  * the last %d-th execution of\n\tinstruction %d, %s\n\tfrom thread %lu\n",
                   dep.Cnt, dep.ID, Ins[dep.ID].Code.c_str(), dep.TID);
             }
+            // Phi dependencies
+            // TODO
           }
           InstCount[I(*tid_ptr, ins_id)]++;
         }
         // A basic block is used if at least one of its instruction is used
         if (used) {
           used_successor.insert(*tid_ptr);
+          // used_call_ins.insert(GetCaller(*tid_ptr, *id_ptr, -BBCount[I(*tid_ptr, *id_ptr)]));
         } else {
           used_successor.erase(*tid_ptr);
         }
+        BBCount[I(*tid_ptr, *id_ptr)]++;
       }
     }
     _ -= sizeof(uint64_t);

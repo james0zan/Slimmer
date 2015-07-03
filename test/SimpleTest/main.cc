@@ -1,18 +1,23 @@
 #include <stdio.h>
 
-const char *format = "%d %d %p %p\n";
+const char *format = "%d %p %p\n";
 struct X {
   int a, b;
 };
 
+void Foo(X* tmp) {
+  printf("%p\n", tmp);
+  tmp->b = 2;
+}
+
 int main(void) {
   X tmp;
   tmp.a = 1;
-  tmp.b = 2;
+  Foo(&tmp);
   int c = 1;
-  printf(format, tmp.a, tmp.b, format, &tmp);
+  printf(format, tmp.a, format, &tmp);
   
-  int a = 1;
-  printf("%d\n", a);
+  // int a = 1;
+  // printf("%d\n", a);
 }
 

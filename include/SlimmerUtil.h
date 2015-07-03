@@ -26,7 +26,7 @@
 #include <string>
 #include <sstream>
 
-// #define DEBUG_SLIMMER_UTILL
+#define DEBUG_SLIMMER_UTILL
 #ifdef DEBUG_SLIMMER_UTILL
 #define DEBUG(...) fprintf(stderr, __VA_ARGS__)
 #else
@@ -185,15 +185,18 @@ struct InstInfo {
   std::vector<std::pair<DepType, uint32_t> > SSADependencies;
 
   // Instruction type
-  enum {
+  enum InstType {
     NormalInst,
     LoadInst,
     StoreInst,
     CallInst,
+    ExternalCallInst,
+    ReturnInst,
     TerminatorInst,
     PhiNode,
     VarArg
-  } Type;
+  };
+  InstType Type;
 
   // The called function name or [UNKNOWN] for CallInst.
   std::string Fun;

@@ -73,6 +73,10 @@ void LoadInstInfo(string path, vector<InstInfo>& info, vector<vector<uint32_t> >
       ins.Type = InstInfo::StoreInst;
     } else if (tmp == "CallInst") {
       ins.Type = InstInfo::CallInst;
+    } else if (tmp == "ExternalCallInst") {
+      ins.Type = InstInfo::ExternalCallInst;
+    } else if (tmp == "ReturnInst") {
+      ins.Type = InstInfo::ReturnInst;
     } else if (tmp == "TerminatorInst") {
       ins.Type = InstInfo::TerminatorInst;
     } else if (tmp == "PhiNode") {
@@ -81,9 +85,9 @@ void LoadInstInfo(string path, vector<InstInfo>& info, vector<vector<uint32_t> >
       ins.Type = InstInfo::VarArg;
     }
 
-    if (ins.Type == InstInfo::CallInst) {
+    if (ins.Type == InstInfo::CallInst || ins.Type == InstInfo::ExternalCallInst) {
       file >> ins.Fun;
-    } else if (ins.Type == InstInfo::TerminatorInst) {
+    } else if (ins.Type == InstInfo::TerminatorInst || ins.Type == InstInfo::ReturnInst) {
       file >> cnt;
       while (cnt--) {
         file >> x;
