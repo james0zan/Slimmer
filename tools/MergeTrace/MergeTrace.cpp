@@ -85,6 +85,7 @@ void getInsFlow(char *inst_file, char *trace_file_name) {
   map<uint64_t, pair<uint8_t, uint32_t> > is_first;
   vector<SmallestBlock> trace;
 
+  map<uint64_t, stack<int32_t> > this_bb_id, last_bb_id;
   TraceIter iter(trace_file_name);
   while (iter.NextEvent(event_label, tid_ptr, id_ptr, addr_ptr, length_ptr)) {
     if (event_label == ArgumentEventLabel) {
@@ -96,12 +97,17 @@ void getInsFlow(char *inst_file, char *trace_file_name) {
     if (event_label == BasicBlockEventLabel) {
       if (call_stack[*tid_ptr].empty()) {
         is_first[*tid_ptr] = make_pair((uint8_t)2, (uint32_t)0);
+        this_bb_id[*tid_ptr].push(*id_ptr);
+        last_bb_id[*tid_ptr].push(-1);
       }
       while (!call_stack[*tid_ptr].empty()) {
         StackInfo info = call_stack[*tid_ptr].back();
         if (info.CurIndex >= BB2Ins[info.BBID].size()) {
           call_stack[*tid_ptr].pop_back();
           is_first[*tid_ptr] = make_pair((uint8_t)0, (uint32_t)0);
+
+          last_bb_id[*tid_ptr].top() = this_bb_id[*tid_ptr].top();
+          this_bb_id[*tid_ptr].top() = (*id_ptr);
         } else {
           assert(Ins[BB2Ins[info.BBID][info.CurIndex - 1]].Type == InstInfo::CallInst);
           is_first[*tid_ptr] = make_pair((uint8_t)1, BB2Ins[info.BBID][info.CurIndex - 1]);
@@ -114,7 +120,7 @@ void getInsFlow(char *inst_file, char *trace_file_name) {
       uint32_t ins_id = BB2Ins[info.BBID][info.CurIndex++];
       assert((*id_ptr) == ins_id);
 
-      SmallestBlock b(SmallestBlock::MemoryAccessBlock, *tid_ptr, info.BBID, info.CurIndex - 1, info.CurIndex, is_first[*tid_ptr]);
+      SmallestBlock b(SmallestBlock::MemoryAccessBlock, *tid_ptr, info.BBID, info.CurIndex - 1, info.CurIndex, is_first[*tid_ptr], last_bb_id[*tid_ptr].top());
       b.Addr.push_back(*addr_ptr);  b.Addr.push_back(*addr_ptr + *length_ptr);
       is_first[*tid_ptr] = make_pair((uint8_t)0, (uint32_t)0);
       trace.push_back(b);
@@ -123,7 +129,7 @@ void getInsFlow(char *inst_file, char *trace_file_name) {
       uint32_t ins_id = BB2Ins[info.BBID][info.CurIndex++];
       assert((*id_ptr) == ins_id);
       
-      SmallestBlock b(SmallestBlock::ExternalCallBlock, *tid_ptr, info.BBID, info.CurIndex - 1, info.CurIndex, is_first[*tid_ptr]);
+      SmallestBlock b(SmallestBlock::ExternalCallBlock, *tid_ptr, info.BBID, info.CurIndex - 1, info.CurIndex, is_first[*tid_ptr], last_bb_id[*tid_ptr].top());
       b.Addr.push_back(*addr_ptr);
 
       for (auto i: args[*tid_ptr]) b.Addr.push_back(i);
@@ -166,9 +172,12 @@ void getInsFlow(char *inst_file, char *trace_file_name) {
 
       SmallestBlock b;
       if (end_index > start_index) {
-        SmallestBlock b(SmallestBlock::NormalBlock, *tid_ptr, info.BBID, start_index, end_index, is_first[*tid_ptr]);
+        SmallestBlock b(SmallestBlock::NormalBlock, *tid_ptr, info.BBID, start_index, end_index, is_first[*tid_ptr], last_bb_id[*tid_ptr].top());
         if (last_bb) {
           call_stack[*tid_ptr].pop_back();
+          this_bb_id[*tid_ptr].pop();
+          last_bb_id[*tid_ptr].pop();
+
           if (call_stack[*tid_ptr].empty()) {
             b.IsLast = 2;
           } else {

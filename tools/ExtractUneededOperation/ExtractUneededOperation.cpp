@@ -45,7 +45,7 @@ void LoadMemDependency(char *mem_dependencies_file_name, map<DynamicInst, vector
   // puts("==============");
 }
 
-void OneInstruction(bool is_needed, DynamicInst dyn_ins, set<pair<uint64_t, uint32_t> >& needed, set<DynamicInst>& mem_depended) {
+void OneInstruction(bool is_needed, DynamicInst dyn_ins, int32_t last_bb_id, set<pair<uint64_t, uint32_t> >& needed, set<DynamicInst>& mem_depended) {
   if (!is_needed) {
     printf("!!!The last %d-th execution of\n  instruction %d, %s\n  from thread %lu is uneeded.\n",
       dyn_ins.Cnt, dyn_ins.ID, Ins[dyn_ins.ID].Code.c_str(), dyn_ins.TID);
@@ -75,7 +75,18 @@ void OneInstruction(bool is_needed, DynamicInst dyn_ins, set<pair<uint64_t, uint
   }
   
   // Phi dependencies
-  // TODO
+  for (auto phi_dep: Ins[dyn_ins.ID].PhiDependencies) {
+    if ((int32_t)get<0>(phi_dep) == last_bb_id) {
+      if (get<1>(phi_dep) == InstInfo::Inst) {
+        printf("  * the last execution of\n\tinstruction %d, %s\n\tfrom thread %lu\n",
+          get<2>(phi_dep), Ins[get<2>(phi_dep)].Code.c_str(), dyn_ins.TID);
+        needed.insert(I(dyn_ins.TID, get<2>(phi_dep)));
+      } else if (get<1>(phi_dep) == InstInfo::Arg || get<1>(phi_dep) == InstInfo::PointerArg) {
+        // TODO
+      }
+      break;
+    }
+  }
 }
 
 bool isReturnVoid(string code) {
@@ -105,7 +116,7 @@ void ExtractUneededOperation(char *merged_trace_file_name, char *output_file_nam
 
     if (b.Type == SmallestBlock::ImpactfulCallBlock) {
       DynamicInst dyn_ins(b.TID, BB2Ins[b.BBID][b.Start], -InstCount[I(b.TID, BB2Ins[b.BBID][b.Start])]);
-      OneInstruction(true, dyn_ins, needed, mem_depended);
+      OneInstruction(true, dyn_ins, b.LastBBID, needed, mem_depended);
       InstCount[I(dyn_ins.TID, dyn_ins.ID)]++;
 
       fun_used[b.TID].top() = true;
@@ -113,7 +124,7 @@ void ExtractUneededOperation(char *merged_trace_file_name, char *output_file_nam
     } else if (b.Type == SmallestBlock::MemoryAccessBlock || b.Type == SmallestBlock::ExternalCallBlock) {
       DynamicInst dyn_ins(b.TID, BB2Ins[b.BBID][b.Start], -InstCount[I(b.TID, BB2Ins[b.BBID][b.Start])]);
       bool is_needed = ((needed.count(I(dyn_ins.TID, dyn_ins.ID)) > 0) || (mem_depended.count(dyn_ins) > 0));
-      OneInstruction(is_needed , dyn_ins, needed, mem_depended);
+      OneInstruction(is_needed , dyn_ins, b.LastBBID, needed, mem_depended);
       mem_depended.erase(dyn_ins);
       InstCount[I(dyn_ins.TID, dyn_ins.ID)]++;
 
@@ -137,7 +148,7 @@ void ExtractUneededOperation(char *merged_trace_file_name, char *output_file_nam
           }
         }
 
-        OneInstruction(is_needed, dyn_ins, needed, mem_depended);
+        OneInstruction(is_needed, dyn_ins, b.LastBBID, needed, mem_depended);
         InstCount[I(dyn_ins.TID, dyn_ins.ID)]++;
         fun_used[b.TID].top() |= is_needed;
         this_bb_used |= is_needed;

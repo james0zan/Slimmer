@@ -104,8 +104,10 @@ struct SmallestBlock {
   uint8_t IsLast;
   uint32_t Caller; // The instruction ID of the caller, valid when IsFirst == 1
 
+  int32_t LastBBID;
+
   SmallestBlock() {}
-  SmallestBlock(SmallestBlockType t, uint64_t tid, uint32_t bb_id, uint32_t start, uint32_t end, pair<uint8_t, uint32_t> first) {
+  SmallestBlock(SmallestBlockType t, uint64_t tid, uint32_t bb_id, uint32_t start, uint32_t end, pair<uint8_t, uint32_t> first, int32_t last_bb_id) {
     Type = t;
     TID = tid;
     BBID = bb_id;
@@ -114,24 +116,28 @@ struct SmallestBlock {
     IsFirst = first.first;
     Caller = first.second;
     IsLast = 0;
+    LastBBID = last_bb_id;
   }
 
   void Print(vector<InstInfo>& Ins, vector<vector<uint32_t> >& BB2Ins) {
     if (Type == NormalBlock) {
       printf("[Thead %lu] NormalBlock\n\t<BB %u, Index %u> -> <BB %u, Index %u>", TID, BBID, Start, BBID, End);
       printf("\n\tIsFirst %d IsLast %d Caller %u\n", IsFirst, IsLast, Caller);
+      printf("\tLastBBID %d\n", LastBBID);
       for (uint32_t i = Start; i < End; ++i) {
         printf("\t%u: %s\n", BB2Ins[BBID][i], Ins[BB2Ins[BBID][i]].Code.c_str());
       }
     } else if (Type == MemoryAccessBlock) {
       printf("[Thead %lu] MemoryAccessBlock\n\t<BB %u, Index %u> Address [%p, %p)", TID, BBID, Start, (void*)Addr[0], (void*)Addr[1]);
       printf("\n\tIsFirst %d IsLast %d Caller %u\n", IsFirst, IsLast, Caller);
+      printf("\tLastBBID %d\n", LastBBID);
       printf("\t%u: %s\n", BB2Ins[BBID][Start], Ins[BB2Ins[BBID][Start]].Code.c_str());
     } else if (Type == ExternalCallBlock || Type == ImpactfulCallBlock) {
       printf("[Thead %lu] %s\n", TID, Type == ExternalCallBlock ? "ExternalCallBlock" : "ImpactfulCallBlock");
       printf("\t<BB %u, Index %u> Address %p\n\tArg", BBID, Start, (void*)Addr[0]);
       for (size_t i = 1; i < Addr.size(); ++i) printf(" %p", (void*)Addr[i]);
       printf("\n\tIsFirst %d IsLast %d Caller %u\n", IsFirst, IsLast, Caller);
+      printf("\tLastBBID %d\n", LastBBID);
       printf("\t%u: %s\n", BB2Ins[BBID][Start], Ins[BB2Ins[BBID][Start]].Code.c_str());
     }
   }
@@ -153,6 +159,7 @@ struct SmallestBlock {
     fwrite(&IsFirst, sizeof(uint8_t), 1, f);
     fwrite(&Caller, sizeof(uint32_t), 1, f);
     fwrite(&IsLast, sizeof(uint8_t), 1, f);
+    fwrite(&LastBBID, sizeof(int32_t), 1, f);
     for (auto i: Addr) {
       fwrite(&i, sizeof(uint64_t), 1, f);
     }
@@ -175,6 +182,7 @@ struct SmallestBlock {
     IsFirst = (*(uint8_t *)(from)); from += 1;
     Caller = (*(uint32_t *)(from)); from += 4;
     IsLast = (*(uint8_t *)(from)); from += 1;
+    LastBBID = (*(int32_t *)(from)); from += 4;
     for (uint32_t i = 0; i < addr_size; ++i, from += 8) {
       Addr.push_back(*(uint64_t *)(from));
     }
@@ -190,6 +198,7 @@ struct SmallestBlock {
     }
     reverse(Addr.begin(),Addr.end()); 
     
+    cur -= 4; LastBBID = (*(int32_t *)(&data[cur])); 
     cur -= 1; IsLast = (*(uint8_t *)(&data[cur])); 
     cur -= 4; Caller = (*(uint32_t *)(&data[cur])); 
     cur -= 1; IsFirst = (*(uint8_t *)(&data[cur])); 
