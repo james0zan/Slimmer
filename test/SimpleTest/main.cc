@@ -9,6 +9,10 @@
 //   tmp->b = 2;
 // }
 
+bool phi(bool r, bool y){
+    return y || r ;
+}
+
 int main(void) {
   // X tmp;
   // tmp.a = 1;
@@ -16,12 +20,6 @@ int main(void) {
   // int c = 1;
   // printf(format, tmp.a, format, &tmp);
   
-  int a = 0;
-  bool is = true;
-  if (is) {
-    a = 1;
-  }
-  // int a = 1;
-  printf("%d\n", a);
+  printf("%d\n", phi(false, true));
 }
 
