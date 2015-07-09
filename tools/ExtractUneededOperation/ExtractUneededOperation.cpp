@@ -136,6 +136,8 @@ void ExtractUneededOperation(char *merged_trace_file_name, char *output_file_nam
         bool is_needed = (needed.count(I(dyn_ins.TID, dyn_ins.ID)) > 0);
 
         if (Ins[dyn_ins.ID].Type == InstInfo::TerminatorInst) {
+          // if (isPostDominator(bb_used[b.TID].top().first, b.BBID)) continue; //TODO
+
           is_needed |= bb_used[b.TID].top().second;
         } else if (Ins[dyn_ins.ID].Type == InstInfo::ReturnInst) {
           if (isReturnVoid(Ins[dyn_ins.ID].Code)) continue;
