@@ -45,6 +45,58 @@ void LoadMemDependency(char *mem_dependencies_file_name, map<DynamicInst, vector
   // puts("==============");
 }
 
+void DFSOnBBGraph(uint32_t bb_id, set<uint32_t>& mark, map<uint32_t, vector<uint32_t> >& successor) {
+  mark.insert(bb_id);
+  for (auto i: successor[bb_id]) {
+    if (mark.count(i) == 0)
+      DFSOnBBGraph(i, mark, successor);
+  }
+}
+
+void SetIntersection(set<uint32_t> &a, set<uint32_t>&b) {
+  set<uint32_t> c;
+  for (auto i: a) {
+    if (b.count(i))
+      c.insert(i);
+  }
+  a = c;
+}
+
+map<uint32_t, set<uint32_t> > PostDominator;
+void PreparePostDominator(char *bbgraph_file_name, map<uint32_t, set<uint32_t> >& post_dominator) {
+  post_dominator.clear();
+
+  FILE *f = fopen(bbgraph_file_name, "r");
+  map<uint32_t, vector<uint32_t> > successor;
+  int a, b;
+  while (fscanf(f, "%d%d", &a, &b) != EOF) {
+    successor[a].push_back(b);
+  }
+
+  for (auto i: successor) {
+    DFSOnBBGraph(i.first, post_dominator[i.first], successor);
+  }
+
+  bool changed = true;
+  while (changed) {
+    changed = false;
+
+    set<uint32_t> res;
+    for (auto i: successor) {
+      if (i.second.size() > 0) res = post_dominator[i.first];
+      for (auto j: i.second) {
+        SetIntersection(res, post_dominator[j]);
+      }
+      // if (i.second.size() == 1) res.insert(i.second[0]); // TODO
+
+      if (res.size() != post_dominator[i.first].size()) {
+        post_dominator[i.first] = res;
+        changed = true;
+      }
+    }
+  }
+}
+
 void OneInstruction(bool is_needed, DynamicInst dyn_ins, int32_t last_bb_id, set<pair<uint64_t, uint32_t> >& needed, set<DynamicInst>& mem_depended) {
   if (!is_needed) {
     printf("!!!The last %d-th execution of\n  instruction %d, %s\n  from thread %lu is uneeded.\n",
@@ -136,7 +188,7 @@ void ExtractUneededOperation(char *merged_trace_file_name, char *output_file_nam
         bool is_needed = (needed.count(I(dyn_ins.TID, dyn_ins.ID)) > 0);
 
         if (Ins[dyn_ins.ID].Type == InstInfo::TerminatorInst) {
-          // if (isPostDominator(bb_used[b.TID].top().first, b.BBID)) continue; //TODO
+          if (PostDominator[b.BBID].count(bb_used[b.TID].top().first)) continue;
 
           is_needed |= bb_used[b.TID].top().second;
         } else if (Ins[dyn_ins.ID].Type == InstInfo::ReturnInst) {
@@ -174,15 +226,17 @@ void ExtractUneededOperation(char *merged_trace_file_name, char *output_file_nam
 }
 
 int main(int argc, char *argv[]) {
-  if (argc != 4 && argc != 5) {
-    printf("Usage: extract-uneeded-operation inst-file mem-dependencies merged-trace-file [output-file]\n");
+  if (argc != 5 && argc != 6) {
+    printf("Usage: extract-uneeded-operation inst-file bbgraph-file mem-dependencies merged-trace-file [output-file]\n");
     exit(1);
   }
   LoadInstInfo(argv[1], Ins, BB2Ins);
-  LoadMemDependency(argv[2], MemDependencies);
-  if (argc == 4) {
-    ExtractUneededOperation(argv[3], "SlimmerUneededOperation");
+  
+  PreparePostDominator(argv[2], PostDominator);
+  LoadMemDependency(argv[3], MemDependencies);
+  if (argc == 5) {
+    ExtractUneededOperation(argv[4], "SlimmerUneededOperation");
   } else {
-    ExtractUneededOperation(argv[3], argv[4]);
+    ExtractUneededOperation(argv[4], argv[5]);
   }
 }

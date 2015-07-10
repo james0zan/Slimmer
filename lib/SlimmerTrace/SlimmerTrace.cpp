@@ -50,6 +50,7 @@ namespace {
     // The output files
     std::fstream fInst;
     std::fstream fInstrumentedFun;
+    std::fstream fBBGraph;
     std::set<std::string> instrumentedFun;
 
     // Map a basic block to its ID
@@ -165,6 +166,7 @@ bool SlimmerTrace::doInitialization(Module& module)  {
   system(("mkdir -p " + InfoDir).c_str());
   fInst.open(InfoDir + "/Inst", std::fstream::out);
   fInstrumentedFun.open(InfoDir + "/InstrumentedFun", std::fstream::out);
+  fBBGraph.open(InfoDir + "/BBGraph", std::fstream::out);
   
   // Get references to the different types that we'll need.
   Int8Type  = IntegerType::getInt8Ty(module.getContext());
@@ -296,6 +298,7 @@ bool SlimmerTrace::runOnModule(Module& module) {
         BasicBlock *succ = terminator_ptr->getSuccessor(index);
         assert(bb2ID.count(succ) > 0);
         fInst << bb2ID[succ] << " ";
+        fBBGraph << bb2ID[ins_ptr->getParent()] << " " << bb2ID[succ] << "\n";
       }
 
       fInst << "\n";
