@@ -75,6 +75,7 @@ namespace {
     // Function *recordAddLock;
     Function *recordBasicBlockEvent;
     Function *recordMemoryEvent;
+    Function *recordStoreEvent;
     // Function *recordCallEvent;
     Function *recordReturnEvent;
     Function *recordArgumentEvent;
@@ -194,6 +195,10 @@ bool SlimmerTrace::doInitialization(Module& module)  {
   recordMemoryEvent = cast<Function>(
     module.getOrInsertFunction("recordMemoryEvent",
       VoidType, Int32Type, VoidPtrType, Int64Type, nullptr));
+
+  recordStoreEvent = cast<Function>(
+    module.getOrInsertFunction("recordStoreEvent",
+      VoidType, Int32Type, VoidPtrType, Int64Type, Int64Type, nullptr));
 
   // // Recording the call to an uninstrumented function
   // recordCallEvent = cast<Function>(
@@ -425,8 +430,16 @@ void SlimmerTrace::instrumentStoreInst(StoreInst *store_ptr) {
   uint64_t size = dataLayout->getTypeStoreSize(store_ptr->getOperand(0)->getType());
   Value *store_size = ConstantInt::get(Int64Type, size);
   
-  std::vector<Value *> args = make_vector<Value *>(store_id, addr, store_size, 0);
-  CallInst::Create(recordMemoryEvent, args)->insertAfter(store_ptr);
+  if (size <= 64) {
+    // Cast the pointer into a void pointer type.
+    Value *value = store_ptr->getValueOperand();
+    value = LLVMCastTo(value, Int64Type, value->getName(), store_ptr);
+    std::vector<Value *> args = make_vector<Value *>(store_id, addr, store_size, value, 0);
+    CallInst::Create(recordStoreEvent, args)->insertBefore(store_ptr);
+  } else {
+    std::vector<Value *> args = make_vector<Value *>(store_id, addr, store_size, 0);
+    CallInst::Create(recordMemoryEvent, args)->insertAfter(store_ptr);
+  }
 }
 
 /// Add a call to the recordReturnEvent function after the function call.

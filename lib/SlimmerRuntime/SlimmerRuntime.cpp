@@ -312,6 +312,32 @@ void recordMemoryEvent(uint32_t id, void *addr, uint64_t length) {
   DEBUG("[MemoryEvent] id = %u, addr = %p, len = %lu\n", id, addr, length);  
 }
 
+/// Append a MemoryEvent for a store instruction to the trace buffer.
+///
+/// \param id - the instruction ID.
+/// \param addr - the starting address of the accessed memory.
+/// \param length - the length of the accessed memory.
+/// \param value - the stored value
+///
+__attribute__((always_inline))
+void recordStoreEvent(uint32_t id, void *addr, uint64_t length, int64_t value) {
+  char *buffer = event_buffer.StartAppend(SizeOfMemoryEvent);
+  if (*((int64_t*)addr) == value) {
+    DEBUG("Inefficacious write!!!\n");
+    length = 0;
+  }
+
+  *buffer = MemoryEventLabel;
+  (*(uint64_t *)(buffer + 1)) = local_tid;
+  (*(uint32_t *)(buffer + 9)) = id;
+  (*(uint64_t *)(buffer + 13)) = (uint64_t)addr;
+  (*(uint64_t *)(buffer + 21)) = length;
+  *(buffer + 29) = MemoryEventLabel;
+
+  event_buffer.EndAppend();
+  DEBUG("[MemoryEvent] id = %u, addr = %p, len = %lu, value = %lu\n", id, addr, length, value);  
+}
+
 /// Append a ReturnEvent to the trace buffer.
 ///
 /// \param id - the instruction ID.

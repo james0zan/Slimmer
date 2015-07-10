@@ -47,6 +47,7 @@ public:
   /// Set a range [l, r) to be value _v.
   ///
   void Set(uint64_t l, uint64_t r, T v) {
+    if (l >= r) return;
     // assert(_v > 0); int v = (int)_v; // 0 and -1 are reserved
 
     // If already covered
@@ -115,6 +116,8 @@ public:
   /// Collect is a wrapper of Collect2.
   ///
   void Collect2(uint64_t l, uint64_t r, std::vector<Segment<T> >& res) {
+    if (l >= r) return;
+    
     if (type != PARTIAL_SEGMENT) {
       res.push_back(Segment<T>(type, value, left, right));
       if (res.size() >= 2) {

@@ -13,6 +13,7 @@ int main(void) {
   X tmp;
   tmp.a = 1;
   Foo(&tmp);
+  tmp.b = 2;
   int c = 1;
   printf(format, tmp.a, format, &tmp);
 }

@@ -117,6 +117,9 @@ void ExtractMemoryDependency(char *merged_trace_file_name, char *output_file_nam
     if (b.Type == SmallestBlock::MemoryAccessBlock) {
       uint32_t ins_id = BB2Ins[b.BBID][b.Start];
       DynamicInst dyn_inst = DynamicInst(b.TID, ins_id, InstCount[I(b.TID, ins_id)]++);
+
+      if (b.Addr[0] >= b.Addr[1]) continue;
+
       if (Ins[ins_id].Type == InstInfo::StoreInst) {
         Addr2LastStore->Set(b.Addr[0], b.Addr[1], dyn_inst);
       } else {
@@ -265,6 +268,8 @@ void GroupMemory(char *merged_trace_file_name, char *output_file_name) {
     SmallestBlock b; b.ReadBack(data, cur);
 
     if (b.Type == SmallestBlock::MemoryAccessBlock) {
+      if (b.Addr[0] >= b.Addr[1]) continue;
+      
       shoud_merge.clear();
       auto ins = I(b.TID, BB2Ins[b.BBID][b.Start]);
 
