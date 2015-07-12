@@ -13,6 +13,7 @@ namespace boost {
 void throw_exception(std::exception const& e) {}
 }
 
+/// An iterator for the compressed trace data.
 struct TraceIter {
   boost::iostreams::mapped_file_source trace;
   const char* data;
@@ -27,6 +28,11 @@ struct TraceIter {
     data_iter = decoded_iter = decoded_size = 0;
   }
 
+  /// Obtain the next event.
+  ///
+  /// \param * - stores the corresponding field of the next event.
+  /// \return - return false if the trace is ended.
+  ///
   bool NextEvent(
     char& event_label, const uint64_t*& tid_ptr, 
     const uint32_t*& id_ptr, const uint64_t*& addr_ptr, 
@@ -49,62 +55,37 @@ struct TraceIter {
   }
 };
 
-struct TraceBackwardIter {
-  boost::iostreams::mapped_file_source trace;
-  const char* data;
-  char *decoded;
-  int64_t data_iter, decoded_iter, decoded_size;
-
-  TraceBackwardIter(char *trace_file_name) : trace(trace_file_name) {
-    data = trace.data();
-    decoded = (char *)malloc(COMPRESS_BLOCK_SIZE);
-    data_iter = trace.size();
-    decoded_iter = -1;
-    decoded_size = 0;
-  }
-
-  bool FormerEvent(
-    char& event_label, const uint64_t*& tid_ptr, 
-    const uint32_t*& id_ptr, const uint64_t*& addr_ptr, 
-    const uint64_t*& length_ptr) {
-    
-    if (decoded_iter <= 0) {
-      if (data_iter <= 0) return false; // Trace is ended
-      data_iter -= sizeof(uint64_t);
-      uint64_t length = (*(uint64_t *)(&data[data_iter]));
-      data_iter -= length;
-
-      decoded_size = LZ4_decompress_safe((const char*) &data[data_iter], decoded, length, COMPRESS_BLOCK_SIZE);
-      decoded_iter = decoded_size - 1;
-
-      data_iter -= sizeof(uint64_t);
-    }
-
-    decoded_iter -= GetEvent(true, decoded + decoded_iter, event_label, tid_ptr, id_ptr, addr_ptr, length_ptr);
-    return true;
-  }
-};
-
+/// A smallest block is a continuous part of a basic block
+/// that will always be executed continuously.
+///
 struct SmallestBlock {
   enum SmallestBlockType {
-    NormalBlock,
-    MemoryAccessBlock,
-    ExternalCallBlock,
-    ImpactfulCallBlock,
+    NormalBlock, // A continuous part of a basic block that contains no memory accessed
+    MemoryAccessBlock, // A single memory access
+    ExternalCallBlock, // A single external call that do not impact the outside enviroment
+    ImpactfulCallBlock, // A single external call that impacts the outside enviroment
   } Type;
 
   uint64_t TID;
-  uint32_t BBID, Start, End;
+  uint32_t BBID, Start, End; // The instructions' ID of this SmallestBlock is blong to [Start, End).
+  // If this is a MemoryAccessBlock:
+  //    Addr[0] is the starting address of accessed memory;
+  //    Addr[1] is the ending address of accessed memory.
+  // If this is a ExternalCallBlock or ImpactfulCallBlock:
+  //    Addr is the vector of pointer arguments.
   vector<uint64_t> Addr;
 
-  // 0: Is a following SmallestBlock
-  // 1: Is the first SmallestBlock of a called function
-  // 2: Is the first SmallestBlock of a thread
+  // IsFirst = 0: Is a following SmallestBlock
+  // IsFirst = 1: Is the first SmallestBlock of a called function
+  // IsFirst = 2: Is the first SmallestBlock of a thread
   uint8_t IsFirst;
+  // IsLast = 0: Is not the last SmallestBlock
+  // IsLast = 1: Is the last SmallestBlock of a called function
+  // IsLast = 2: Is the last SmallestBlock of a thread
   uint8_t IsLast;
   uint32_t Caller; // The instruction ID of the caller, valid when IsFirst == 1
 
-  int32_t LastBBID;
+  int32_t LastBBID; // The basic block ID of the last executed basic block
 
   SmallestBlock() {}
   SmallestBlock(SmallestBlockType t, uint64_t tid, uint32_t bb_id, uint32_t start, uint32_t end, pair<uint8_t, uint32_t> first, int32_t last_bb_id) {
@@ -142,6 +123,8 @@ struct SmallestBlock {
     }
   }
 
+  /// Dump a SmallestBlock to a file.
+  ///
   void Dump(FILE* f) {
     uint32_t addr_size = Addr.size();
     uint8_t type = 0;
@@ -166,6 +149,11 @@ struct SmallestBlock {
     fwrite(&addr_size, sizeof(uint32_t), 1, f);
   }
 
+  /// Read a SmallestBlock from a file.
+  ///
+  /// \param from - the SmallestBlock is stored start from here
+  /// \return - the size of this SmallestBlock
+  ///
   uint32_t ReadFrom(const char*& from) {
     const char *origin = from;
 
@@ -191,6 +179,12 @@ struct SmallestBlock {
     return from - origin;
   }
 
+  /// Read a SmallestBlock from a file backwardly.
+  ///
+  /// \param data - the mmaped data buffer that reserve SmallestBlocks.
+  /// \param cur - the end of this SmallestBlock is stored at data[cur - 1].
+  /// \return - the size of this SmallestBlock
+  ///
   void ReadBack(const char*& data, int64_t& cur) {    
     cur -= 4; uint32_t addr_size = (*(uint32_t *)(&data[cur])); 
     for (uint32_t i = 0; i < addr_size; ++i) {

@@ -322,6 +322,8 @@ void recordMemoryEvent(uint32_t id, void *addr, uint64_t length) {
 __attribute__((always_inline))
 void recordStoreEvent(uint32_t id, void *addr, uint64_t length, int64_t value) {
   char *buffer = event_buffer.StartAppend(SizeOfMemoryEvent);
+  // If it writes the same value as the original one,
+  // it is an inefficacious write.
   if (*((int64_t*)addr) == value) {
     DEBUG("Inefficacious write!!!\n");
     length = 0;
