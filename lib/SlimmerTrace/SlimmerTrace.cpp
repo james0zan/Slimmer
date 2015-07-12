@@ -260,6 +260,7 @@ bool notTraced(Instruction *ins) {
 
 bool SlimmerTrace::runOnModule(Module& module) { 
   LOG(DEBUG, "SlimmerTrace::runOnModule") << "Start";
+  LOG(DEBUG, "SlimmerTrace::getModuleIdentifier") << module.getModuleIdentifier();
 
   dataLayout = &getAnalysis<DataLayout>();
 
