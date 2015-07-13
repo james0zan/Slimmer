@@ -101,7 +101,11 @@ int Merging(set<int> groups) {
   return new_group;
 }
 
-
+/// Extracting the memory dependencies.
+///
+/// \param merged_trace_file_name - the merged trace outputed by the merge-trace tool.
+/// \param output_file_name - the path to output file.
+///
 void ExtractMemoryDependency(char *merged_trace_file_name, char *output_file_name) {
   FILE *output_file = fopen(output_file_name, "w");
   boost::iostreams::mapped_file_source trace(merged_trace_file_name);
@@ -118,14 +122,16 @@ void ExtractMemoryDependency(char *merged_trace_file_name, char *output_file_nam
       uint32_t ins_id = BB2Ins[b.BBID][b.Start];
       DynamicInst dyn_inst = DynamicInst(b.TID, ins_id, InstCount[I(b.TID, ins_id)]++);
 
-      if (b.Addr[0] >= b.Addr[1]) continue;
+      if (b.Addr[0] >= b.Addr[1]) continue; // Inefficacious write
 
       if (Ins[ins_id].Type == InstInfo::StoreInst) {
+        // Recording a store
         Addr2LastStore->Set(b.Addr[0], b.Addr[1], dyn_inst);
       } else {
         printf("The %d-th execution of\n\tinstruction %d, %s\n\tfrom thread %lu is depended on:\n",
           dyn_inst.Cnt, dyn_inst.ID, Ins[dyn_inst.ID].Code.c_str(), dyn_inst.TID);
 
+        // Obtaining all the last writes
         for (auto j: Addr2LastStore->Collect(b.Addr[0], b.Addr[1])) {
           if (j.type == COVERED_SEGMENT) {
             printf("\t* the %d-th execution of\n\t  instruction %d, %s\n\t  from thread %lu\n",
@@ -142,6 +148,8 @@ void ExtractMemoryDependency(char *merged_trace_file_name, char *output_file_nam
       printf("The %d-th execution of\n\tinstruction %d, %s\n\tfrom thread %lu is depended on:\n",
         dyn_inst.Cnt, dyn_inst.ID, Ins[dyn_inst.ID].Code.c_str(), dyn_inst.TID);
 
+      // All the memory addresses of a group are assumed to be accessed,
+      // if one of them is passed as an argument.
       for (size_t i = 1; i < b.Addr.size(); ++i) {
         int group_id; 
         if (!Addr2Group->Get(b.Addr[i], group_id)) continue;
@@ -179,6 +187,13 @@ void ExtractMemoryDependency(char *merged_trace_file_name, char *output_file_nam
 
 
 map<uint64_t, set<uint32_t> > LabeledArgs;
+/// Merging all the addresses used in an instruction into one group.
+///
+/// \param shoud_merge - a set of groups that should be merged.
+/// \param ins - a pair of {Thread ID, Instruction ID}.
+/// \param b - the current SmallestBlock object that contains ins.
+/// \return - the group ID of merged group.
+///
 int MergeInst(set<int>& shoud_merge, pair<uint64_t, uint32_t> ins, SmallestBlock& b) {
   auto ins_id = ins.second;
 
@@ -256,6 +271,13 @@ int MergeInst(set<int>& shoud_merge, pair<uint64_t, uint32_t> ins, SmallestBlock
   return new_group;
 }
 
+/// Group the memory address into groups.
+/// Two addresses will be group into one group
+/// if one can be calculated from the other.
+///
+/// \param merged_trace_file_name - the merged trace outputed by the merge-trace tool.
+/// \param output_file_name - the path to output file.
+///
 void GroupMemory(char *merged_trace_file_name, char *output_file_name) {
   Addr2Group = SegmentTree<int>::NewTree();
   Group2Addr.clear();
@@ -268,12 +290,12 @@ void GroupMemory(char *merged_trace_file_name, char *output_file_name) {
     SmallestBlock b; b.ReadBack(data, cur);
 
     if (b.Type == SmallestBlock::MemoryAccessBlock) {
-      if (b.Addr[0] >= b.Addr[1]) continue;
+      if (b.Addr[0] >= b.Addr[1]) continue; // Inefficacious write
       
       shoud_merge.clear();
       auto ins = I(b.TID, BB2Ins[b.BBID][b.Start]);
 
-      // Inserting the address range
+      // All the addresses of [Addr[0], Addr[1]) should belong to the same group
       vector<pair<uint64_t, uint64_t> > ranges;
       for (auto i: Collect(b.Addr[0], b.Addr[1])) {
         if (i.type == EMPTY_SEGMENT) {
