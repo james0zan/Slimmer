@@ -13,6 +13,10 @@ namespace boost {
 void throw_exception(std::exception const& e) {}
 }
 
+inline pair<uint64_t, uint32_t> I(uint64_t tid, uint32_t id) {
+  return make_pair(tid, id);
+}
+
 /// An iterator for the compressed trace data.
 struct TraceIter {
   boost::iostreams::mapped_file_source trace;

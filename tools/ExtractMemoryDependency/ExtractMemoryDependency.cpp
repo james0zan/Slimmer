@@ -1,10 +1,6 @@
 #include "SlimmerTools.h"
 #include "SegmentTree.hpp"
 
-#include <set>
-
-using namespace std;
-
 // A segment tree that maps a memory address to its group
 SegmentTree<int> *Addr2Group;
 // For each group, we use a segment tree to record all the memory addresses that belong to it
@@ -13,10 +9,6 @@ map<uint32_t, SegmentTree<int> *> Group2Addr;
 vector<InstInfo> Ins;
 // Map a basic block ID to all the instructions that belong to it
 vector<vector<uint32_t> > BB2Ins;
-
-inline pair<uint64_t, uint32_t> I(uint64_t tid, uint32_t id) {
-  return make_pair(tid, id);
-}
 
 /// Collect all the groups within a specific range of memory.
 ///
@@ -171,9 +163,9 @@ void ExtractMemoryDependency(char *merged_trace_file_name, char *output_file_nam
     }
   }
 
-  fprintf(output_file, "0 -1 -1 0 -1 -1\n");
+  fprintf(output_file, "0 -1 -1 0 -1 -1\n"); // Line of demarcation
   for (auto i: InstCount) {
-    printf("Thread %lu has executed instruction %d %d-th\n", i.first.first, i.first.second, i.second);
+    // printf("Thread %lu has executed instruction %d %d-th\n", i.first.first, i.first.second, i.second);
     fprintf(output_file, "%lu %d %d\n", i.first.first, i.first.second, i.second);
   }
   delete Addr2Group;
@@ -186,15 +178,18 @@ void ExtractMemoryDependency(char *merged_trace_file_name, char *output_file_nam
 }
 
 
-map<uint64_t, set<uint32_t> > LabeledArgs;
 /// Merging all the addresses used in an instruction into one group.
 ///
 /// \param shoud_merge - a set of groups that should be merged.
 /// \param ins - a pair of {Thread ID, Instruction ID}.
 /// \param b - the current SmallestBlock object that contains ins.
+/// \param labeled_args - a map that maps the thread ID to arguments that have a group label attached.
 /// \return - the group ID of merged group.
 ///
-int MergeInst(set<int>& shoud_merge, pair<uint64_t, uint32_t> ins, SmallestBlock& b) {
+int MergeInst(
+  set<int>& shoud_merge, pair<uint64_t, uint32_t> ins, 
+  SmallestBlock& b, map<uint64_t, set<uint32_t> >& labeled_args) {
+
   auto ins_id = ins.second;
 
   // Merging the result variable
@@ -226,7 +221,7 @@ int MergeInst(set<int>& shoud_merge, pair<uint64_t, uint32_t> ins, SmallestBlock
       auto dependent_ins = I(b.TID, dep.second);
       if (dep.first == InstInfo::PointerArg) {
         dependent_ins.second += Ins.size();
-        LabeledArgs[dependent_ins.first].insert(dependent_ins.second);
+        labeled_args[dependent_ins.first].insert(dependent_ins.second);
       }
       Ins2Group[dependent_ins] = new_group;
       Group2Ins[new_group].insert(dependent_ins);
@@ -235,10 +230,10 @@ int MergeInst(set<int>& shoud_merge, pair<uint64_t, uint32_t> ins, SmallestBlock
 
   // If it is the first Smallest of a function
   if (b.IsFirst == 1 || b.IsFirst == 2) {
-    auto labeled_args = LabeledArgs[b.TID];
-    LabeledArgs[b.TID].clear();
+    auto labeled_arg = labeled_args[b.TID];
+    labeled_args[b.TID].clear();
 
-    for (auto i: labeled_args) {
+    for (auto i: labeled_arg) {
       auto dependent_arg = I(b.TID, i);
       if (Ins2Group.count(dependent_arg)) {
         uint32_t arg_group = Ins2Group[dependent_arg];
@@ -252,7 +247,7 @@ int MergeInst(set<int>& shoud_merge, pair<uint64_t, uint32_t> ins, SmallestBlock
             auto dependent_ins = I(b.TID, used_arg.second);
             if (used_arg.first == InstInfo::PointerArg) {
               dependent_ins.second += Ins.size();
-              LabeledArgs[dependent_ins.first].insert(dependent_ins.second);
+              labeled_args[dependent_ins.first].insert(dependent_ins.second);
             }
 
             // Merging the argument's group withe the variable's group
@@ -279,6 +274,8 @@ int MergeInst(set<int>& shoud_merge, pair<uint64_t, uint32_t> ins, SmallestBlock
 /// \param output_file_name - the path to output file.
 ///
 void GroupMemory(char *merged_trace_file_name, char *output_file_name) {
+  map<uint64_t, set<uint32_t> > LabeledArgs;
+
   Addr2Group = SegmentTree<int>::NewTree();
   Group2Addr.clear();
   MaxGroupID = 0;
@@ -305,7 +302,7 @@ void GroupMemory(char *merged_trace_file_name, char *output_file_name) {
         }
       }
 
-      auto new_group = MergeInst(shoud_merge, ins, b);
+      auto new_group = MergeInst(shoud_merge, ins, b, LabeledArgs);
 
       for (auto i: ranges) {
         Group2Addr[new_group]->Set(i.first, i.second, 1);
@@ -317,15 +314,15 @@ void GroupMemory(char *merged_trace_file_name, char *output_file_name) {
         if (!Ins[ins.second].IsPointer || Ins[ins.second].Type == InstInfo::CallInst) continue;
         
         shoud_merge.clear();
-        MergeInst(shoud_merge, ins, b);
+        MergeInst(shoud_merge, ins, b, LabeledArgs);
       }
     }
   }
 
-  auto cur = Addr2Group->Collect(0, SegmentTree<int>::MAX_RANGE);
-  for (auto i: cur) {
-    printf("[%lx,%lx): %d %d\n", i.left, i.right, i.type, i.value);
-  }
+  // auto cur = Addr2Group->Collect(0, SegmentTree<int>::MAX_RANGE);
+  // for (auto i: cur) {
+  //   printf("[%lx,%lx): %d %d\n", i.left, i.right, i.type, i.value);
+  // }
 
   ExtractMemoryDependency(merged_trace_file_name, output_file_name);
 }

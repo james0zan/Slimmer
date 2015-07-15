@@ -1,12 +1,5 @@
 #include "SlimmerTools.h"
 
-#include <set>
-using namespace std;
-
-inline pair<uint64_t, uint32_t> I(uint64_t tid, uint32_t id) {
-  return make_pair(tid, id);
-}
-
 // Map an instruction ID to its instruction infomation
 vector<InstInfo> Ins;
 // Map a basic block ID to all the instructions that belong to it
