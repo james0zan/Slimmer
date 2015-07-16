@@ -134,6 +134,36 @@ void ExtractMemoryDependency(char *merged_trace_file_name, char *output_file_nam
           }
         }
       }
+    } else if (b.Type == SmallestBlock::MemsetBlock) {
+      uint32_t ins_id = BB2Ins[b.BBID][b.Start];
+      DynamicInst dyn_inst = DynamicInst(b.TID, ins_id, InstCount[I(b.TID, ins_id)]++);
+
+      if (b.Addr[0] >= b.Addr[1]) continue; // Inefficacious write
+
+      // Recording a store
+      Addr2LastStore->Set(b.Addr[0], b.Addr[1], dyn_inst);
+    } else if (b.Type == SmallestBlock::MemmoveBlock) {
+      uint32_t ins_id = BB2Ins[b.BBID][b.Start];
+      DynamicInst dyn_inst = DynamicInst(b.TID, ins_id, InstCount[I(b.TID, ins_id)]++);
+
+      if (b.Addr[0] >= b.Addr[1]) continue; // Inefficacious write
+
+      printf("The %d-th execution of\n\tinstruction %d, %s\n\tfrom thread %lu is depended on:\n",
+        dyn_inst.Cnt, dyn_inst.ID, Ins[dyn_inst.ID].Code.c_str(), dyn_inst.TID);
+
+      // Obtaining all the last writes
+      for (auto j: Addr2LastStore->Collect(b.Addr[2], b.Addr[3])) {
+        if (j.type == COVERED_SEGMENT) {
+          printf("\t* the %d-th execution of\n\t  instruction %d, %s\n\t  from thread %lu\n",
+            j.value.Cnt, j.value.ID, Ins[j.value.ID].Code.c_str(), j.value.TID);
+          fprintf(output_file, "%lu %d %d %lu %d %d\n",
+            dyn_inst.TID, dyn_inst.ID, dyn_inst.Cnt,
+            j.value.TID, j.value.ID, j.value.Cnt);
+        }
+      }
+
+      // Recording a store
+      Addr2LastStore->Set(b.Addr[0], b.Addr[1], dyn_inst);
     } else if (b.Type == SmallestBlock::ExternalCallBlock || b.Type == SmallestBlock::ImpactfulCallBlock) {
       uint32_t ins_id = BB2Ins[b.BBID][b.Start];
       DynamicInst dyn_inst = DynamicInst(b.TID, ins_id, InstCount[I(b.TID, ins_id)]++);
@@ -286,7 +316,7 @@ void GroupMemory(char *merged_trace_file_name, char *output_file_name) {
   for (int64_t cur = trace.size(); cur > 0;) {
     SmallestBlock b; b.ReadBack(data, cur);
 
-    if (b.Type == SmallestBlock::MemoryAccessBlock) {
+    if (b.Type == SmallestBlock::MemoryAccessBlock || b.Type == SmallestBlock::MemsetBlock || b.Type == SmallestBlock::MemmoveBlock) {
       if (b.Addr[0] >= b.Addr[1]) continue; // Inefficacious write
       
       shoud_merge.clear();
@@ -299,6 +329,15 @@ void GroupMemory(char *merged_trace_file_name, char *output_file_name) {
           ranges.push_back(make_pair(i.left, i.right));
         } else {
           shoud_merge.insert(i.value);
+        }
+      }
+      if (b.Type == SmallestBlock::MemmoveBlock) {
+        for (auto i: Collect(b.Addr[2], b.Addr[3])) {
+          if (i.type == EMPTY_SEGMENT) {
+            ranges.push_back(make_pair(i.left, i.right));
+          } else {
+            shoud_merge.insert(i.value);
+          }
         }
       }
 

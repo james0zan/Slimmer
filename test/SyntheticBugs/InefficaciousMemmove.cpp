@@ -9,4 +9,3 @@ int main(void) {
   memcpy(&b, &a, sizeof(uint64_t));
   printf("%lu\n", b);
 }
-

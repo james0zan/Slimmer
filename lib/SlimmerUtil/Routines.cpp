@@ -126,7 +126,7 @@ void LoadInstInfo(string path, vector<InstInfo>& info, vector<vector<uint32_t> >
 ///
 int GetEvent(bool backward, const char *cur, 
   char& event_label, const uint64_t*& tid_ptr, const uint32_t*& id_ptr,
-  const uint64_t*& addr_ptr, const uint64_t*& length_ptr) {
+  const uint64_t*& addr_ptr, const uint64_t*& length_ptr, const uint64_t*& addr2_ptr) {
   event_label = (*cur);
 
   switch (event_label) {
@@ -155,5 +155,20 @@ int GetEvent(bool backward, const char *cur,
       tid_ptr = (const uint64_t *)(cur + 1);
       addr_ptr = (const uint64_t *)(cur + 9);\
       return SizeOfArgumentEvent;
+    case MemsetEventLabel:
+      if (backward) cur -= SizeOfMemsetEvent - 1;
+      tid_ptr = (const uint64_t *)(cur + 1);
+      id_ptr = (const uint32_t *)(cur + 9);
+      addr_ptr = (const uint64_t *)(cur + 13);
+      length_ptr = (const uint64_t *)(cur + 21);
+      return SizeOfMemsetEvent;
+    case MemmoveEventLabel:
+      if (backward) cur -= SizeOfMemmoveEvent - 1;
+      tid_ptr = (const uint64_t *)(cur + 1);
+      id_ptr = (const uint32_t *)(cur + 9);
+      addr_ptr = (const uint64_t *)(cur + 13);
+      addr2_ptr = (const uint64_t *)(cur + 21);
+      length_ptr = (const uint64_t *)(cur + 29);
+      return SizeOfMemmoveEvent;
   }
 }

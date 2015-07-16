@@ -199,7 +199,7 @@ void ExtractUneededOperation(char *merged_trace_file_name, char *output_file_nam
 
       fun_used[b.TID].top() = true;
       this_bb_used = true;
-    } else if (b.Type == SmallestBlock::MemoryAccessBlock || b.Type == SmallestBlock::ExternalCallBlock) {
+    } else if (b.Type == SmallestBlock::MemoryAccessBlock || b.Type == SmallestBlock::ExternalCallBlock || b.Type == SmallestBlock::MemsetBlock || b.Type == SmallestBlock::MemmoveBlock) {
       DynamicInst dyn_ins(b.TID, BB2Ins[b.BBID][b.Start], -InstCount[I(b.TID, BB2Ins[b.BBID][b.Start])]);
       bool is_needed = ((needed.count(I(dyn_ins.TID, dyn_ins.ID)) > 0) || (mem_depended.count(dyn_ins) > 0));
       OneInstruction(is_needed , dyn_ins, b.LastBBID, needed, mem_depended);

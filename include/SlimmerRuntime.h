@@ -13,5 +13,7 @@ extern "C" void recordStoreEvent(uint32_t id, void *addr, uint64_t length, int64
 extern "C" void recordCallEvent(uint32_t id, void *fun);
 extern "C" void recordReturnEvent(uint32_t id, void *fun);
 extern "C" void recordArgumentEvent(void *arg);
+extern "C" void recordMemset(uint32_t id, void *addr, uint64_t length, uint8_t value);
+extern "C" void recordMemmove(uint32_t id, void *dest, void *src, uint64_t length);
 
 #endif // SLIMMER_RUNTIME_H

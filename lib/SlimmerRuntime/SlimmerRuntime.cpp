@@ -377,3 +377,70 @@ void recordArgumentEvent(void *arg) {
 
   event_buffer.EndAppend();
 }
+
+/// Append an MemsetEvent to the trace buffer.
+///
+/// \param id - the instruction ID.
+/// \param addr - the starting address of the accessed memory.
+/// \param length - the length of the accessed memory.
+/// \param value - the stored value
+///
+__attribute__((always_inline))
+void recordMemset(uint32_t id, void *addr, uint64_t length, uint8_t value) {
+  DEBUG("[MemsetEvent] id = %u, addr = %p, len = %lu, value = %u\n", id, addr, length, value); 
+
+  char *buffer = event_buffer.StartAppend(SizeOfMemsetEvent);
+  // If it writes the same value as the original one,
+  // it is an inefficacious write.
+  bool changed = false;
+  for (uint64_t i = 0; i < length; ++i) {
+    if ((*((uint8_t*)addr + i)) != value) {
+      changed = true;
+      break;
+    }
+  }
+  if (!changed) {
+    DEBUG("Inefficacious write!!!\n");
+    length = 0;
+  }
+
+  *buffer = MemsetEventLabel;
+  (*(uint64_t *)(buffer + 1)) = local_tid;
+  (*(uint32_t *)(buffer + 9)) = id;
+  (*(uint64_t *)(buffer + 13)) = (uint64_t)addr;
+  (*(uint64_t *)(buffer + 21)) = length;
+  *(buffer + 29) = MemsetEventLabel;
+
+  event_buffer.EndAppend();
+}
+
+/// Append an MemmoveEvent to the trace buffer.
+///
+/// \param id - the instruction ID.
+/// \param dest - the starting address of the destination memory.
+/// \param src - the starting address of the source memory.
+/// \param length - the length of the accessed memory.
+///
+__attribute__((always_inline))
+void recordMemmove(uint32_t id, void *dest, void *src, uint64_t length) {
+  DEBUG("[MemmoveEvent] id = %u, dest = %p, src = %p, len = %lu\n", id, dest, src, length); 
+
+  char *buffer = event_buffer.StartAppend(SizeOfMemmoveEvent);
+  // If it writes the same value as the original one,
+  // it is an inefficacious write.
+  if (memcmp(dest, src, length) == 0) {
+    DEBUG("Inefficacious write!!!\n");
+    length = 0;
+  }
+
+  *buffer = MemmoveEventLabel;
+  (*(uint64_t *)(buffer + 1)) = local_tid;
+  (*(uint32_t *)(buffer + 9)) = id;
+  (*(uint64_t *)(buffer + 13)) = (uint64_t)dest;
+  (*(uint64_t *)(buffer + 21)) = (uint64_t)src;
+  (*(uint64_t *)(buffer + 29)) = length;
+  *(buffer + 37) = MemmoveEventLabel;
+
+  event_buffer.EndAppend();
+}
+

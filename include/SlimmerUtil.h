@@ -147,8 +147,10 @@ const static char CallEventLabel = 2;
 const static char ReturnEventLabel = 3;
 const static char SyscallEventLabel = 4;
 const static char ArgumentEventLabel = 5;
-const static char EndEventLabel = 6;
-const static char PlaceHolderLabel = 7;
+const static char MemsetEventLabel = 6;
+const static char MemmoveEventLabel = 7;
+const static char EndEventLabel = 125;
+const static char PlaceHolderLabel = 126;
 
 // The size of each evet
 // Common part of each event: 2 label + Thread ID + ID
@@ -157,6 +159,8 @@ const static size_t SizeOfBasicBlockEvent = SizeOfEventCommon;
 const static size_t SizeOfMemoryEvent = SizeOfEventCommon + 2 * 8;
 const static size_t SizeOfReturnEvent = SizeOfEventCommon + 8;
 const static size_t SizeOfArgumentEvent = 2 + 8 + 8;
+const static size_t SizeOfMemsetEvent = SizeOfMemoryEvent;
+const static size_t SizeOfMemmoveEvent = SizeOfEventCommon + 3*8;
 
 #define COMPRESS_BLOCK_CNT 150
 #define COMPRESS_BLOCK_SIZE 33554432lu
@@ -207,7 +211,7 @@ struct InstInfo {
   std::vector<std::tuple<uint32_t, DepType, uint32_t> > PhiDependencies;
 };
 
-int GetEvent(bool backward, const char *cur, char& event_label, const uint64_t*& tid_ptr, const uint32_t*& id_ptr, const uint64_t*& addr_ptr, const uint64_t*& length_ptr);
+int GetEvent(bool backward, const char *cur, char& event_label, const uint64_t*& tid_ptr, const uint32_t*& id_ptr, const uint64_t*& addr_ptr, const uint64_t*& length_ptr, const uint64_t*& addr2_ptr);
 void LoadInstrumentedFun(std::string path, std::set<std::string>& instrumented);
 void LoadInstInfo(std::string path, std::vector<InstInfo>& info, std::vector<std::vector<uint32_t> >& bb2ins);
 

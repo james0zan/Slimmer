@@ -40,7 +40,7 @@ struct TraceIter {
   bool NextEvent(
     char& event_label, const uint64_t*& tid_ptr, 
     const uint32_t*& id_ptr, const uint64_t*& addr_ptr, 
-    const uint64_t*& length_ptr) {
+    const uint64_t*& length_ptr, const uint64_t*& addr2_ptr) {
     
     if (decoded_iter >= decoded_size) {
       if (ended || data_iter >= trace.size()) return false; // Trace is ended
@@ -53,7 +53,7 @@ struct TraceIter {
 
       data_iter += length + sizeof(uint64_t);
     }
-    decoded_iter += GetEvent(false, decoded + decoded_iter, event_label, tid_ptr, id_ptr, addr_ptr, length_ptr);
+    decoded_iter += GetEvent(false, decoded + decoded_iter, event_label, tid_ptr, id_ptr, addr_ptr, length_ptr, addr2_ptr);
     if (event_label == EndEventLabel) ended = true;
     return true;
   }
@@ -68,6 +68,8 @@ struct SmallestBlock {
     MemoryAccessBlock, // A single memory access
     ExternalCallBlock, // A single external call that do not impact the outside enviroment
     ImpactfulCallBlock, // A single external call that impacts the outside enviroment
+    MemsetBlock, // A single memset
+    MemmoveBlock // A single memset
   } Type;
 
   uint64_t TID;
@@ -112,8 +114,10 @@ struct SmallestBlock {
       for (uint32_t i = Start; i < End; ++i) {
         printf("\t%u: %s\n", BB2Ins[BBID][i], Ins[BB2Ins[BBID][i]].Code.c_str());
       }
-    } else if (Type == MemoryAccessBlock) {
-      printf("[Thead %lu] MemoryAccessBlock\n\t<BB %u, Index %u> Address [%p, %p)", TID, BBID, Start, (void*)Addr[0], (void*)Addr[1]);
+    } else if (Type == MemoryAccessBlock || Type == MemsetBlock) {
+      printf("[Thead %lu] %s\n\t<BB %u, Index %u> Address [%p, %p)", 
+        TID, Type == MemoryAccessBlock ? "MemoryAccessBlock" : "MemsetBlock",
+        BBID, Start, (void*)Addr[0], (void*)Addr[1]);
       printf("\n\tIsFirst %d IsLast %d Caller %u\n", IsFirst, IsLast, Caller);
       printf("\tLastBBID %d\n", LastBBID);
       printf("\t%u: %s\n", BB2Ins[BBID][Start], Ins[BB2Ins[BBID][Start]].Code.c_str());
@@ -124,7 +128,13 @@ struct SmallestBlock {
       printf("\n\tIsFirst %d IsLast %d Caller %u\n", IsFirst, IsLast, Caller);
       printf("\tLastBBID %d\n", LastBBID);
       printf("\t%u: %s\n", BB2Ins[BBID][Start], Ins[BB2Ins[BBID][Start]].Code.c_str());
-    }
+    } else if (Type == MemmoveBlock) {
+      printf("[Thead %lu] MemmoveBlock\n\t<BB %u, Index %u> Address [%p, %p) [%p, %p)", 
+        TID, BBID, Start, (void*)Addr[0], (void*)Addr[1], (void*)Addr[2], (void*)Addr[3]);
+      printf("\n\tIsFirst %d IsLast %d Caller %u\n", IsFirst, IsLast, Caller);
+      printf("\tLastBBID %d\n", LastBBID);
+      printf("\t%u: %s\n", BB2Ins[BBID][Start], Ins[BB2Ins[BBID][Start]].Code.c_str());
+    } 
   }
 
   /// Dump a SmallestBlock to a file.
@@ -136,6 +146,8 @@ struct SmallestBlock {
     if (Type == MemoryAccessBlock) type = 1;
     if (Type == ExternalCallBlock) type = 2;
     if (Type == ImpactfulCallBlock) type = 3;
+    if (Type == MemsetBlock) type = 4;
+    if (Type == MemmoveBlock) type = 5;
 
     fwrite(&addr_size, sizeof(uint32_t), 1, f);
     fwrite(&type, sizeof(uint8_t), 1, f);
@@ -167,6 +179,8 @@ struct SmallestBlock {
     if (type == 1) Type = MemoryAccessBlock;
     if (type == 2) Type = ExternalCallBlock;
     if (type == 3) Type = ImpactfulCallBlock;
+    if (type == 4) Type = MemsetBlock;
+    if (type == 5) Type = MemmoveBlock;
     TID = (*(uint64_t *)(from)); from += 8;
     BBID = (*(uint32_t *)(from)); from += 4;
     Start = (*(uint32_t *)(from)); from += 4;
@@ -209,6 +223,8 @@ struct SmallestBlock {
     if (type == 1) Type = MemoryAccessBlock;
     if (type == 2) Type = ExternalCallBlock;
     if (type == 3) Type = ImpactfulCallBlock;
+    if (type == 4) Type = MemsetBlock;
+    if (type == 5) Type = MemmoveBlock;
     cur -= 4;
   }
 };

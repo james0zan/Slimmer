@@ -69,6 +69,8 @@ namespace {
     void instrumentLoadInst(LoadInst *load_ins);
     void instrumentStoreInst(StoreInst *store_ptr);
     void instrumentCallInst(CallInst *call_ptr);
+    void instrumentMemset(CallInst *call_ptr);
+    void instrumentMemmove(CallInst *call_ptr);
 
     // Functions for recording events during execution
     Function *recordInit;
@@ -79,6 +81,8 @@ namespace {
     // Function *recordCallEvent;
     Function *recordReturnEvent;
     Function *recordArgumentEvent;
+    Function *recordMemset;
+    Function *recordMemmove;
 
     // Integer types
     Type *Int8Type;
@@ -215,6 +219,15 @@ bool SlimmerTrace::doInitialization(Module& module)  {
     module.getOrInsertFunction("recordArgumentEvent",
       VoidType, VoidPtrType, nullptr));
 
+  // Recording a memset
+  recordMemset = cast<Function>(
+    module.getOrInsertFunction("recordMemset",
+      VoidType, Int32Type, VoidPtrType, Int64Type, Int8Type, nullptr));
+
+  // Recording a memmove/memcoy
+  recordMemmove = cast<Function>(
+    module.getOrInsertFunction("recordMemmove",
+      VoidType, Int32Type, VoidPtrType, VoidPtrType, Int64Type, nullptr));
 
   // Create the constructor
   appendCtor(module);
@@ -252,7 +265,12 @@ bool notTraced(Instruction *ins) {
     Function *called_fun = call_ptr->getCalledFunction();
     if (called_fun->isIntrinsic()) {
       std::string fun_name = called_fun->stripPointerCasts()->getName().str();
-      if (fun_name.substr(0, 9) == "llvm.dbg.") return true;
+      if (fun_name.substr(0,12) == "llvm.memset.") return false;
+      if (fun_name.substr(0,12) == "llvm.memcpy.") return false;
+      if (fun_name.substr(0,13) == "llvm.memmove.") return false;
+      
+      return true;
+      // if (fun_name.substr(0, 9) == "llvm.dbg.") return true;
     }
   }
   return false;
@@ -260,7 +278,6 @@ bool notTraced(Instruction *ins) {
 
 bool SlimmerTrace::runOnModule(Module& module) { 
   LOG(DEBUG, "SlimmerTrace::runOnModule") << "Start";
-  LOG(DEBUG, "SlimmerTrace::getModuleIdentifier") << module.getModuleIdentifier();
 
   dataLayout = &getAnalysis<DataLayout>();
 
@@ -336,7 +353,13 @@ bool SlimmerTrace::runOnModule(Module& module) {
       } else if (called_fun->isIntrinsic()) {
         std::string fun_name = called_fun->stripPointerCasts()->getName().str();
         fInst << "\tCallInst\n\t" << fun_name << "\n";
-        // TODO
+        
+        if (fun_name.substr(0,12) == "llvm.memset.") {
+          instrumentMemset(call_ptr);
+        }
+        if (fun_name.substr(0,12) == "llvm.memcpy." || fun_name.substr(0,13) == "llvm.memmove.") {
+          instrumentMemmove(call_ptr);
+        }
       } else {
         std::string fun_name = called_fun->stripPointerCasts()->getName().str();
         
@@ -468,6 +491,49 @@ void SlimmerTrace::instrumentCallInst(CallInst *call_ptr) {
   // CallInst::Create(recordCallEvent, args, "", call_ptr);  
   auto last_ins = CallInst::Create(recordReturnEvent, args);
   last_ins->insertAfter(call_ptr);
+}
+
+/// Add a call to the recordMemset function before the function call.
+///
+/// \param call_ptr - the call instruction.
+///
+void SlimmerTrace::instrumentMemset(CallInst *call_ptr) {
+  // Get the destination pointer and cast it to a void pointer.
+  Value *dest = call_ptr->getOperand(0);
+  dest = LLVMCastTo(dest, VoidPtrType, dest->getName(), call_ptr);
+  // Get the destination pointer and cast it to a void pointer.
+  Value *val = call_ptr->getOperand(1);
+  // Get the number of bytes that will be written into the buffer.
+  Value *len = call_ptr->getOperand(2);
+  len = LLVMCastTo(len, Int64Type, len->getName(), call_ptr);
+  // Get the ID of the call instruction.
+  assert(ins2ID.count(call_ptr) > 0);
+  Value *call_id = ConstantInt::get(Int32Type, ins2ID[call_ptr]);
+
+  std::vector<Value *> args = make_vector<Value *>(call_id, dest, len, val, 0);
+  CallInst::Create(recordMemset, args)->insertBefore(call_ptr);
+}
+
+/// Add a call to the recordMemmove function before the function call.
+///
+/// \param call_ptr - the call instruction.
+///
+void SlimmerTrace::instrumentMemmove(CallInst *call_ptr) {
+  // Get the destination pointer and cast it to a void pointer.
+  Value *dest = call_ptr->getOperand(0);
+  dest = LLVMCastTo(dest, VoidPtrType, dest->getName(), call_ptr);
+  // Get the destination pointer and cast it to a void pointer.
+  Value *src = call_ptr->getOperand(1);
+  src = LLVMCastTo(src, VoidPtrType, src->getName(), call_ptr);
+  // Get the number of bytes that will be written into the buffer.
+  Value *len = call_ptr->getOperand(2);
+  len = LLVMCastTo(len, Int64Type, len->getName(), call_ptr);
+  // Get the ID of the call instruction.
+  assert(ins2ID.count(call_ptr) > 0);
+  Value *call_id = ConstantInt::get(Int32Type, ins2ID[call_ptr]);
+
+  std::vector<Value *> args = make_vector<Value *>(call_id, dest, src, len, 0);
+  CallInst::Create(recordMemmove, args)->insertBefore(call_ptr);
 }
 
 
