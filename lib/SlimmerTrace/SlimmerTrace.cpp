@@ -147,7 +147,7 @@ std::string SlimmerTrace::CommonInfo(Instruction *ins) {
   rso << "\t" << ins->getNumOperands() << " ";
   for (unsigned index = 0; index < ins->getNumOperands(); ++index) {
     if (Instruction *tmp = dyn_cast<Instruction>(ins->getOperand(index))) {
-      assert(ins2ID.count(tmp) > 0);
+      if (ins2ID.count(tmp) == 0) continue;
       rso << "Inst " << ins2ID[tmp] << " ";
     } else if (Argument *arg= dyn_cast<Argument>(ins->getOperand(index))) {
       if (arg->getType()->isPointerTy()) {
