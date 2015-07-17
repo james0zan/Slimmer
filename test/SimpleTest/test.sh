@@ -16,11 +16,11 @@ $LD_NEW -z relro --hash-style=gnu --build-id --eh-frame-hdr -m elf_x86_64 -dynam
   -plugin-opt=--slimmer-info-dir=Slimmer \
   -L/home/zhangmx/GSoC/Slimmer/build/Release+Asserts/lib \
   -lSlimmerRuntime -lSlimmerUtil -lpthread -lstdc++ -llz4
-$PIN_HOME/pin.sh -t ../../build/Release+Asserts/lib/SlimmerPinTool.so -i Slimmer/InstrumentedFun -- ./main
+# $PIN_HOME/pin.sh -t ../../build/Release+Asserts/lib/SlimmerPinTool.so -i Slimmer/InstrumentedFun -- ./main
 
-../../build/Release+Asserts/bin/merge-trace SlimmerPinTrace Slimmer/Inst /scratch1/zhangmx/SlimmerTrace
-../../build/Release+Asserts/bin/extract-memory-dependency Slimmer/Inst /scratch1/zhangmx/SlimmerMergedTrace
-../../build/Release+Asserts/bin/extract-uneeded-operation Slimmer/Inst Slimmer/BBGraph SlimmerMemoryDependency /scratch1/zhangmx/SlimmerMergedTrace
+# ../../build/Release+Asserts/bin/merge-trace SlimmerPinTrace Slimmer/Inst /scratch1/zhangmx/SlimmerTrace
+# ../../build/Release+Asserts/bin/extract-memory-dependency Slimmer/Inst /scratch1/zhangmx/SlimmerMergedTrace
+# ../../build/Release+Asserts/bin/extract-uneeded-operation Slimmer/Inst Slimmer/BBGraph SlimmerMemoryDependency /scratch1/zhangmx/SlimmerMergedTrace
 
 # ../../build/Release+Asserts/bin/extract-memory-dependency Slimmer/Inst /scratch1/zhangmx/SlimmerTrace 
 # ../../build/Release+Asserts/bin/extract-impactful-funcall SlimmerPinTrace 

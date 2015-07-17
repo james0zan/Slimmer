@@ -166,7 +166,10 @@ std::string SlimmerTrace::CommonInfo(Instruction *ins) {
 bool SlimmerTrace::doInitialization(Module& module)  {
   LOG(DEBUG, "SlimmerTrace::doInitialization") << "Start";
 
+
   // Reserve the infomation directory and the files
+  srand(time(NULL));
+  InfoDir = InfoDir + "/" + std::to_string(rand());
   LOG(DEBUG, "SlimmerTrace::InfoDir") << InfoDir;
   system(("mkdir -p " + InfoDir).c_str());
   fInst.open(InfoDir + "/Inst", std::fstream::out);
