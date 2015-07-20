@@ -199,7 +199,8 @@ struct InstInfo {
     ReturnInst,
     TerminatorInst,
     PhiNode,
-    VarArg
+    VarArg,
+    AtomicInst
   };
   InstType Type;
 

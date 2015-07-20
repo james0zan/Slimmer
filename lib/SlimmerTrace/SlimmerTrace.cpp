@@ -71,6 +71,8 @@ namespace {
     void instrumentCallInst(CallInst *call_ptr);
     void instrumentMemset(CallInst *call_ptr);
     void instrumentMemmove(CallInst *call_ptr);
+    void instrumentAtomicRMWInst(AtomicRMWInst *atomic_rmw_ptr);
+    void instrumentAtomicCmpXchgInst(AtomicCmpXchgInst *atomic_cas_ptr);
 
     // Functions for recording events during execution
     Function *recordInit;
@@ -312,6 +314,12 @@ bool SlimmerTrace::runOnModule(Module& module) {
     } else if (StoreInst *store_ptr = dyn_cast<StoreInst>(ins_ptr)) {
       fInst << "\tStoreInst\n";
       instrumentStoreInst(store_ptr);
+    } else if (AtomicRMWInst *atomic_rmw_ptr = dyn_cast<AtomicRMWInst>(ins_ptr)) {
+      fInst << "\tAtomicInst\n"; // Treat AtomicRMWInst as a special tStoreInst
+      instrumentAtomicRMWInst(atomic_rmw_ptr);
+    } else if (AtomicCmpXchgInst *atomic_cas_ptr = dyn_cast<AtomicCmpXchgInst>(ins_ptr)) {
+      fInst << "\tAtomicInst\n"; // Treat AtomicRMWInst as a special tStoreInst
+      instrumentAtomicCmpXchgInst(atomic_cas_ptr);
     } else if (TerminatorInst *terminator_ptr = dyn_cast<TerminatorInst>(ins_ptr)) {
       if (ReturnInst *return_ptr = dyn_cast<ReturnInst>(ins_ptr)) {
         fInst << "\tReturnInst\n\t" << terminator_ptr->getNumSuccessors() << " ";
@@ -395,14 +403,6 @@ bool SlimmerTrace::runOnModule(Module& module) {
   return false; 
 }
 
-/// Add a call to the recordAddLock function before an instruction.
-///
-/// \param ins_ptr - the LLVM IR instruction.
-///
-// void SlimmerTrace::instrumentAddLock(Instruction *ins_ptr) {
-//   CallInst::Create(recordAddLock)->insertBefore(ins_ptr);
-// }
-
 /// Add a call to the recordBasicBlockEvent function
 /// a the begining of a basic block.
 ///
@@ -417,8 +417,7 @@ void SlimmerTrace::instrumentBasicBlock(BasicBlock *bb) {
   CallInst::Create(recordBasicBlockEvent, args, "", bb->getFirstInsertionPt());
 }
 
-/// Add a call to the recordAddLock function before a load,
-/// and a call to the recordMemoryEvent function after it.
+/// Add a call to the recordMemoryEvent function after a load.
 ///
 /// \param load_ptr - the load instruction.
 ///
@@ -439,14 +438,11 @@ void SlimmerTrace::instrumentLoadInst(LoadInst *load_ptr) {
   CallInst::Create(recordMemoryEvent, args)->insertAfter(load_ptr);
 }
 
-/// Add a call to the recordAddLock function before a store,
-/// and a call to the recordMemoryEvent function after it.
+/// Add a call to the recordMemoryEvent function after a store.
 ///
 /// \param store_ptr - the store instruction.
 ///
 void SlimmerTrace::instrumentStoreInst(StoreInst *store_ptr) {
-  // instrumentAddLock(store_ptr);
-
   // Get the ID of the load instruction.
   assert(ins2ID.count(store_ptr) > 0);
   Value *store_id = ConstantInt::get(Int32Type, ins2ID[store_ptr]);
@@ -468,6 +464,45 @@ void SlimmerTrace::instrumentStoreInst(StoreInst *store_ptr) {
     CallInst::Create(recordMemoryEvent, args)->insertAfter(store_ptr);
   }
 }
+
+/// Add a call to the recordMemoryEvent function after an AtomicRMWInst.
+///
+/// \param atomic_rmw_ptr - the AtomicRMWInst.
+///
+void SlimmerTrace::instrumentAtomicRMWInst(AtomicRMWInst *atomic_rmw_ptr) {
+  // Get the ID of the load instruction.
+  assert(ins2ID.count(atomic_rmw_ptr) > 0);
+  Value *atomic_rmw_id = ConstantInt::get(Int32Type, ins2ID[atomic_rmw_ptr]);
+  // Cast the pointer into a void pointer type.
+  Value *addr = atomic_rmw_ptr->getPointerOperand();
+  addr = LLVMCastTo(addr, VoidPtrType, addr->getName(), atomic_rmw_ptr);
+  // Get the size of the loaded data.
+  uint64_t size = dataLayout->getTypeStoreSize(atomic_rmw_ptr->getOperand(0)->getType());
+  Value *store_size = ConstantInt::get(Int64Type, size);
+  
+  std::vector<Value *> args = make_vector<Value *>(atomic_rmw_id, addr, store_size, 0);
+  CallInst::Create(recordMemoryEvent, args)->insertAfter(atomic_rmw_ptr);
+}
+
+/// Add a call to the recordMemoryEvent function after an AtomicCmpXchgInst.
+///
+/// \param atomic_cas_ptr - the AtomicCmpXchgInst.
+///
+void SlimmerTrace::instrumentAtomicCmpXchgInst(AtomicCmpXchgInst *atomic_cas_ptr) {
+  // Get the ID of the load instruction.
+  assert(ins2ID.count(atomic_cas_ptr) > 0);
+  Value *atomic_rmw_id = ConstantInt::get(Int32Type, ins2ID[atomic_cas_ptr]);
+  // Cast the pointer into a void pointer type.
+  Value *addr = atomic_cas_ptr->getPointerOperand();
+  addr = LLVMCastTo(addr, VoidPtrType, addr->getName(), atomic_cas_ptr);
+  // Get the size of the loaded data.
+  uint64_t size = dataLayout->getTypeStoreSize(atomic_cas_ptr->getOperand(0)->getType());
+  Value *store_size = ConstantInt::get(Int64Type, size);
+  
+  std::vector<Value *> args = make_vector<Value *>(atomic_rmw_id, addr, store_size, 0);
+  CallInst::Create(recordMemoryEvent, args)->insertAfter(atomic_cas_ptr);
+}
+
 
 /// Add a call to the recordReturnEvent function after the function call.
 ///

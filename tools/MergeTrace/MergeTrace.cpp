@@ -229,7 +229,8 @@ void MergeTrace(
           Ins[ins_id].Type == InstInfo::CallInst ||
           Ins[ins_id].Type == InstInfo::ExternalCallInst ||
           Ins[ins_id].Type == InstInfo::LoadInst ||
-          Ins[ins_id].Type == InstInfo::StoreInst) {
+          Ins[ins_id].Type == InstInfo::StoreInst ||
+          Ins[ins_id].Type == InstInfo::AtomicInst) {
           break;
         }
       }

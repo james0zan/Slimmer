@@ -83,6 +83,8 @@ void LoadInstInfo(string path, vector<InstInfo>& info, vector<vector<uint32_t> >
       ins.Type = InstInfo::TerminatorInst;
     } else if (tmp == "PhiNode") {
       ins.Type = InstInfo::PhiNode;
+    } else if (tmp == "AtomicInst") {
+      ins.Type = InstInfo::AtomicInst;
     } else {
       ins.Type = InstInfo::VarArg;
     }

@@ -133,6 +133,11 @@ void ExtractMemoryDependency(char *merged_trace_file_name, char *output_file_nam
               j.value.TID, j.value.ID, j.value.Cnt);
           }
         }
+
+        if (Ins[ins_id].Type == InstInfo::AtomicInst) {
+          // Recording a store from atomic operation
+          Addr2LastStore->Set(b.Addr[0], b.Addr[1], dyn_inst);
+        }
       }
     } else if (b.Type == SmallestBlock::MemsetBlock) {
       uint32_t ins_id = BB2Ins[b.BBID][b.Start];
@@ -358,10 +363,10 @@ void GroupMemory(char *merged_trace_file_name, char *output_file_name) {
     }
   }
 
-  // auto cur = Addr2Group->Collect(0, SegmentTree<int>::MAX_RANGE);
-  // for (auto i: cur) {
-  //   printf("[%lx,%lx): %d %d\n", i.left, i.right, i.type, i.value);
-  // }
+  auto cur = Addr2Group->Collect(0, SegmentTree<int>::MAX_RANGE);
+  for (auto i: cur) {
+    printf("[%lx,%lx): %d %d\n", i.left, i.right, i.type, i.value);
+  }
 
   ExtractMemoryDependency(merged_trace_file_name, output_file_name);
 }
