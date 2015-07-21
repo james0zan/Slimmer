@@ -36,8 +36,11 @@ Value *LLVMCastTo(Value *V, Type *Ty, Twine Name, Instruction *InsertPt) {
 
   // If it's a constant, just create a constant expression.
   if (Constant *C = dyn_cast<Constant>(V)) {
-    Constant *CE = ConstantExpr::getZExtOrBitCast(C, Ty);
-    return CE;
+    if (C->getType()->isPtrOrPtrVectorTy()) {
+      return ConstantExpr::getPointerCast(C, Ty);
+    } else {
+      return ConstantExpr::getZExtOrBitCast(C, Ty);
+    }
   }
 
   // Otherwise, insert a cast instruction.

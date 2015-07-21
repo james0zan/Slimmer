@@ -268,12 +268,13 @@ void SlimmerTrace::appendCtor(Module& module) {
 bool notTraced(Instruction *ins) {
   if (CallInst *call_ptr = dyn_cast<CallInst>(ins)) {
     Function *called_fun = call_ptr->getCalledFunction();
-    if (called_fun->isIntrinsic()) {
-      std::string fun_name = called_fun->stripPointerCasts()->getName().str();
-      if (fun_name.substr(0,12) == "llvm.memset.") return false;
-      if (fun_name.substr(0,12) == "llvm.memcpy.") return false;
-      if (fun_name.substr(0,13) == "llvm.memmove.") return false;
-      
+    if (called_fun && called_fun->isIntrinsic()) {
+      if (called_fun->stripPointerCasts()) {
+        std::string fun_name = called_fun->stripPointerCasts()->getName().str();
+        if (fun_name.substr(0,12) == "llvm.memset.") return false;
+        if (fun_name.substr(0,12) == "llvm.memcpy.") return false;
+        if (fun_name.substr(0,13) == "llvm.memmove.") return false;
+      }
       return true;
       // if (fun_name.substr(0, 9) == "llvm.dbg.") return true;
     }
@@ -285,6 +286,7 @@ bool SlimmerTrace::runOnModule(Module& module) {
   LOG(DEBUG, "SlimmerTrace::runOnModule") << "Start";
 
   dataLayout = &getAnalysis<DataLayout>();
+  
 
   // The basic block (instruction) ID is started from 0
   uint32_t bb_id = 0, ins_id = 0;
@@ -382,6 +384,7 @@ bool SlimmerTrace::runOnModule(Module& module) {
         }
       }
     } else if (InvokeInst *invoke_ptr = dyn_cast<InvokeInst>(ins_ptr)) {
+      assert(false);
       Function *called_fun = invoke_ptr->getCalledFunction();
       if (!called_fun) {
         fInst << "\tCallInst\n\t[UNKNOWN]\n";
@@ -400,7 +403,7 @@ bool SlimmerTrace::runOnModule(Module& module) {
     }
   }
   LOG(DEBUG, "SlimmerTrace::runOnModule") << "End";
-  return false; 
+  return true; 
 }
 
 /// Add a call to the recordBasicBlockEvent function
@@ -452,8 +455,9 @@ void SlimmerTrace::instrumentStoreInst(StoreInst *store_ptr) {
   // Get the size of the loaded data.
   uint64_t size = dataLayout->getTypeStoreSize(store_ptr->getOperand(0)->getType());
   Value *store_size = ConstantInt::get(Int64Type, size);
-  
-  if (size <= 64) {
+
+  auto type = store_ptr->getOperand(0)->getType();
+  if (type->isSingleValueType() && ! type->isVectorTy() && size <= 64) {
     // Cast the pointer into a void pointer type.
     Value *value = store_ptr->getValueOperand();
     value = LLVMCastTo(value, Int64Type, value->getName(), store_ptr);
