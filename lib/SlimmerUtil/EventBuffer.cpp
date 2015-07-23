@@ -53,7 +53,6 @@ void EventBuffer::CloseBufferFile() {
 
   uint64_t after_compress = LZ4_compress_limitedOutput((const char *)buffer, (char *)compressed, offset, LZ4_compressBound(size));
   fwrite(&after_compress, sizeof(after_compress), 1, stream);
-  fprintf(stderr, "1. Before %lu After %lu %lf\n", offset, after_compress, (double)offset/after_compress);
   size_t cur = 0;
   while (cur < after_compress) {
     size_t tmp = fwrite(compressed + cur, 1, after_compress - cur, stream);
@@ -82,7 +81,6 @@ void EventBuffer::Append(const char *event, size_t length) {
   if (offset + length > size) {
     uint64_t after_compress = LZ4_compress_limitedOutput((const char *)buffer, (char *)compressed, offset, LZ4_compressBound(size));
     fwrite(&after_compress, sizeof(after_compress), 1, stream);
-    fprintf(stderr, "2. Before %lu After %lu %lf\n", offset, after_compress, (double)offset/after_compress);
     size_t cur = 0;
     while (cur < after_compress) {
       size_t tmp = fwrite(compressed + cur, 1, after_compress - cur, stream);

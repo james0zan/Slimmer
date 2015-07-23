@@ -121,14 +121,14 @@ void OneInstruction(bool is_needed, DynamicInst dyn_ins, int32_t last_bb_id, set
   }
   
   needed.erase(I(dyn_ins.TID, dyn_ins.ID));
-  printf("The last %d-th execution of\n  instruction %d, %s\n  from thread %lu is depended on:\n",
-    dyn_ins.Cnt, dyn_ins.ID, Ins[dyn_ins.ID].Code.c_str(), dyn_ins.TID);
+  // printf("The last %d-th execution of\n  instruction %d, %s\n  from thread %lu is depended on:\n",
+  //   dyn_ins.Cnt, dyn_ins.ID, Ins[dyn_ins.ID].Code.c_str(), dyn_ins.TID);
 
   // SSA dependencies
   for (auto dep: Ins[dyn_ins.ID].SSADependencies) {
     if (dep.first == InstInfo::Inst) {
-      printf("  * the last execution of\n\tinstruction %d, %s\n\tfrom thread %lu\n",
-        dep.second, Ins[dep.second].Code.c_str(), dyn_ins.TID);
+      // printf("  * the last execution of\n\tinstruction %d, %s\n\tfrom thread %lu\n",
+      //   dep.second, Ins[dep.second].Code.c_str(), dyn_ins.TID);
       needed.insert(I(dyn_ins.TID, dep.second));
     } else if (dep.first == InstInfo::Arg || dep.first == InstInfo::PointerArg) {
       // TODO
@@ -138,16 +138,16 @@ void OneInstruction(bool is_needed, DynamicInst dyn_ins, int32_t last_bb_id, set
   // Memory dependencies
   for (auto dep: MemDependencies[dyn_ins]) {
     mem_depended.insert(dep);
-    printf("  * the last %d-th execution of\n\tinstruction %d, %s\n\tfrom thread %lu\n",
-      dep.Cnt, dep.ID, Ins[dep.ID].Code.c_str(), dep.TID);
+    // printf("  * the last %d-th execution of\n\tinstruction %d, %s\n\tfrom thread %lu\n",
+    //   dep.Cnt, dep.ID, Ins[dep.ID].Code.c_str(), dep.TID);
   }
   
   // Phi dependencies
   for (auto phi_dep: Ins[dyn_ins.ID].PhiDependencies) {
     if ((int32_t)get<0>(phi_dep) == last_bb_id) {
       if (get<1>(phi_dep) == InstInfo::Inst) {
-        printf("  * the last execution of\n\tinstruction %d, %s\n\tfrom thread %lu\n",
-          get<2>(phi_dep), Ins[get<2>(phi_dep)].Code.c_str(), dyn_ins.TID);
+        // printf("  * the last execution of\n\tinstruction %d, %s\n\tfrom thread %lu\n",
+        //   get<2>(phi_dep), Ins[get<2>(phi_dep)].Code.c_str(), dyn_ins.TID);
         needed.insert(I(dyn_ins.TID, get<2>(phi_dep)));
       } else if (get<1>(phi_dep) == InstInfo::Arg || get<1>(phi_dep) == InstInfo::PointerArg) {
         // TODO
@@ -185,7 +185,8 @@ void ExtractUneededOperation(char *merged_trace_file_name, char *output_file_nam
 
   for (int64_t cur = trace.size(); cur > 0;) {
     SmallestBlock b; b.ReadBack(data, cur);
-
+    b.Print(Ins, BB2Ins);
+    
     if (b.IsLast > 0) {
       fun_used[b.TID].push(false);
       bb_used[b.TID].push(make_pair(b.BBID, false));
@@ -243,8 +244,8 @@ void ExtractUneededOperation(char *merged_trace_file_name, char *output_file_nam
     if (b.IsFirst > 0) {
       if (b.IsFirst == 1 && fun_used[b.TID].top()) {
         needed.insert(I(b.TID, b.Caller));
-        printf("Insert a CallInst <%lu, %u>\n", b.TID, b.Caller);
       }
+      // printf("Pop %lu %lu\n", b.TID, fun_used[b.TID].size());
       fun_used[b.TID].pop();
       bb_used[b.TID].pop();
     }
@@ -260,6 +261,7 @@ int main(int argc, char *argv[]) {
   
   PreparePostDominator(argv[2], PostDominator);
   LoadMemDependency(argv[3], MemDependencies);
+
   if (argc == 5) {
     ExtractUneededOperation(argv[4], "SlimmerUneededOperation");
   } else {

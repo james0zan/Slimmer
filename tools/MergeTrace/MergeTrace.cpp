@@ -49,6 +49,7 @@ void ExtractImpactfulFunCall(
           // printf("SyscallEvent %lu\n", *tid_ptr);
           cur += 66;
 
+          if (fun_stack[*tid_ptr].size() == 0) break;
           uint64_t fun = fun_stack[*tid_ptr].top().first;
           uint32_t cnt = fun_stack[*tid_ptr].top().second;
           // printf("The %d-th execution of function %p of thread %lu is impactful\n",
@@ -110,26 +111,26 @@ void MergeTrace(
   map<uint64_t, stack<int32_t> > this_bb_id, last_bb_id;
   TraceIter iter(trace_file_name);
   while (iter.NextEvent(event_label, tid_ptr, id_ptr, addr_ptr, length_ptr, addr2_ptr)) {
-    switch (event_label) {
-      case BasicBlockEventLabel:
-        printf("BasicBlockEvent:  %lu\t%u\n", *tid_ptr, *id_ptr);
-        break;
-      case MemoryEventLabel:
-        printf("MemoryEvent:      %lu\t%u\t%p\t%lu\n", *tid_ptr, *id_ptr, (void*)*addr_ptr, *length_ptr);
-        break;
-      case ReturnEventLabel:
-        printf("ReturnEvent:      %lu\t%u\t%p\n", *tid_ptr, *id_ptr, (void*)*addr_ptr);
-        break;
-      case ArgumentEventLabel:
-        printf("ArgumentEvent:    %lu\t%p\n", *tid_ptr, (void*)*addr_ptr);
-        break;
-      case  MemsetEventLabel:
-        printf("MemsetEvent:      %lu\t%u\t%p\t%lu\n", *tid_ptr, *id_ptr, (void*)*addr_ptr, *length_ptr);
-        break;
-      case  MemmoveEventLabel:
-        printf("MemmoveEvent:     %lu\t%u\t%p\t%p\t%lu\n", *tid_ptr, *id_ptr, (void*)*addr_ptr, (void*)*addr2_ptr, *length_ptr);
-        break;
-    }
+    // switch (event_label) {
+    //   case BasicBlockEventLabel:
+    //     printf("BasicBlockEvent:  %lu\t%u\n", *tid_ptr, *id_ptr);
+    //     break;
+    //   case MemoryEventLabel:
+    //     printf("MemoryEvent:      %lu\t%u\t%p\t%lu\n", *tid_ptr, *id_ptr, (void*)*addr_ptr, *length_ptr);
+    //     break;
+    //   case ReturnEventLabel:
+    //     printf("ReturnEvent:      %lu\t%u\t%p\n", *tid_ptr, *id_ptr, (void*)*addr_ptr);
+    //     break;
+    //   case ArgumentEventLabel:
+    //     printf("ArgumentEvent:    %lu\t%p\n", *tid_ptr, (void*)*addr_ptr);
+    //     break;
+    //   case  MemsetEventLabel:
+    //     printf("MemsetEvent:      %lu\t%u\t%p\t%lu\n", *tid_ptr, *id_ptr, (void*)*addr_ptr, *length_ptr);
+    //     break;
+    //   case  MemmoveEventLabel:
+    //     printf("MemmoveEvent:     %lu\t%u\t%p\t%p\t%lu\n", *tid_ptr, *id_ptr, (void*)*addr_ptr, (void*)*addr2_ptr, *length_ptr);
+    //     break;
+    // }
 
     if (event_label == ArgumentEventLabel) {
       args[*tid_ptr].insert(*addr_ptr);
@@ -173,7 +174,7 @@ void MergeTrace(
       SmallestBlock b(SmallestBlock::MemoryAccessBlock, *tid_ptr, info.BBID, info.CurIndex - 1, info.CurIndex, is_first[*tid_ptr], last_bb_id[*tid_ptr].top());
       b.Addr.push_back(*addr_ptr);  b.Addr.push_back(*addr_ptr + *length_ptr);
       is_first[*tid_ptr] = make_pair((uint8_t)0, (uint32_t)0);
-      b.Print(Ins, BB2Ins);
+      // b.Print(Ins, BB2Ins);
       b.Dump(dump);
     } else if (event_label == ReturnEventLabel) {
       StackInfo& info = call_stack[*tid_ptr].back();
@@ -192,7 +193,7 @@ void MergeTrace(
         b.Type = SmallestBlock::ImpactfulCallBlock;
       }
       FunCount[I(*tid_ptr, *addr_ptr)]++;
-      b.Print(Ins, BB2Ins);
+      // b.Print(Ins, BB2Ins);
       b.Dump(dump);
     } else if (event_label == MemsetEventLabel) {
       StackInfo& info = call_stack[*tid_ptr].back();
@@ -202,7 +203,7 @@ void MergeTrace(
       SmallestBlock b(SmallestBlock::MemsetBlock, *tid_ptr, info.BBID, info.CurIndex - 1, info.CurIndex, is_first[*tid_ptr], last_bb_id[*tid_ptr].top());
       b.Addr.push_back(*addr_ptr);  b.Addr.push_back(*addr_ptr + *length_ptr);
       is_first[*tid_ptr] = make_pair((uint8_t)0, (uint32_t)0);
-      b.Print(Ins, BB2Ins);
+      // b.Print(Ins, BB2Ins);
       b.Dump(dump);
     } else if (event_label == MemmoveEventLabel) {
       StackInfo& info = call_stack[*tid_ptr].back();
@@ -213,7 +214,7 @@ void MergeTrace(
       b.Addr.push_back(*addr_ptr);  b.Addr.push_back(*addr_ptr + *length_ptr);
       b.Addr.push_back(*addr2_ptr);  b.Addr.push_back(*addr2_ptr + *length_ptr);
       is_first[*tid_ptr] = make_pair((uint8_t)0, (uint32_t)0);
-      b.Print(Ins, BB2Ins);
+      // b.Print(Ins, BB2Ins);
       b.Dump(dump);
     } 
 
@@ -246,7 +247,7 @@ void MergeTrace(
           // It is the last SmallestBlock of a function.
           last_bb = true;
         }
-      } 
+      }
 
       SmallestBlock b;
       if (end_index > start_index) {
@@ -267,10 +268,33 @@ void MergeTrace(
           }
         }
         is_first[*tid_ptr] = make_pair((uint8_t)0, (uint32_t)0);
-        b.Print(Ins, BB2Ins);
+        // b.Print(Ins, BB2Ins);
         b.Dump(dump);
       }
       if (!last_bb) break;
+    }
+  }
+
+  for (auto& i: call_stack) {
+    auto tid = i.first;
+    while (!i.second.empty()) {
+      StackInfo& info = call_stack[tid].back();
+      SmallestBlock b(SmallestBlock::NormalBlock, tid, info.BBID, info.CurIndex, info.CurIndex, make_pair((uint8_t)0, (uint32_t)0), last_bb_id[*tid_ptr].top());
+      call_stack[tid].pop_back();
+      this_bb_id[tid].pop();
+      last_bb_id[tid].pop();
+
+      if (call_stack[tid].empty()) {
+        b.IsLast = 2; // The last SmallestBlock of a thread.
+      } else {
+        b.IsLast = 1;
+        StackInfo last_info = call_stack[tid].back();
+        assert(last_info.CurIndex < BB2Ins[last_info.BBID].size());
+        assert(Ins[BB2Ins[last_info.BBID][last_info.CurIndex - 1]].Type == InstInfo::CallInst);
+        b.Caller = BB2Ins[last_info.BBID][last_info.CurIndex - 1];
+      }
+      // b.Print(Ins, BB2Ins);
+      b.Dump(dump);
     }
   }
   fclose(dump);

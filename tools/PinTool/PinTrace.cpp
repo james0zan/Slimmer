@@ -24,7 +24,7 @@
 #include <netdb.h>
 using namespace std;
 
-#define DEBUG_SLIMMER_PIN
+// #define DEBUG_SLIMMER_PIN
 #ifdef DEBUG_SLIMMER_PIN
 #define DEBUG(...) fprintf(stderr, __VA_ARGS__)
 #else

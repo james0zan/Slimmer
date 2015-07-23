@@ -120,14 +120,14 @@ void ExtractMemoryDependency(char *merged_trace_file_name, char *output_file_nam
         // Recording a store
         Addr2LastStore->Set(b.Addr[0], b.Addr[1], dyn_inst);
       } else {
-        printf("The %d-th execution of\n\tinstruction %d, %s\n\tfrom thread %lu is depended on:\n",
-          dyn_inst.Cnt, dyn_inst.ID, Ins[dyn_inst.ID].Code.c_str(), dyn_inst.TID);
+        // printf("The %d-th execution of\n\tinstruction %d, %s\n\tfrom thread %lu is depended on:\n",
+        //   dyn_inst.Cnt, dyn_inst.ID, Ins[dyn_inst.ID].Code.c_str(), dyn_inst.TID);
 
         // Obtaining all the last writes
         for (auto j: Addr2LastStore->Collect(b.Addr[0], b.Addr[1])) {
           if (j.type == COVERED_SEGMENT) {
-            printf("\t* the %d-th execution of\n\t  instruction %d, %s\n\t  from thread %lu\n",
-              j.value.Cnt, j.value.ID, Ins[j.value.ID].Code.c_str(), j.value.TID);
+            // printf("\t* the %d-th execution of\n\t  instruction %d, %s\n\t  from thread %lu\n",
+            //   j.value.Cnt, j.value.ID, Ins[j.value.ID].Code.c_str(), j.value.TID);
             fprintf(output_file, "%lu %d %d %lu %d %d\n",
               dyn_inst.TID, dyn_inst.ID, dyn_inst.Cnt,
               j.value.TID, j.value.ID, j.value.Cnt);
@@ -153,14 +153,14 @@ void ExtractMemoryDependency(char *merged_trace_file_name, char *output_file_nam
 
       if (b.Addr[0] >= b.Addr[1]) continue; // Inefficacious write
 
-      printf("The %d-th execution of\n\tinstruction %d, %s\n\tfrom thread %lu is depended on:\n",
-        dyn_inst.Cnt, dyn_inst.ID, Ins[dyn_inst.ID].Code.c_str(), dyn_inst.TID);
+      // printf("The %d-th execution of\n\tinstruction %d, %s\n\tfrom thread %lu is depended on:\n",
+      //   dyn_inst.Cnt, dyn_inst.ID, Ins[dyn_inst.ID].Code.c_str(), dyn_inst.TID);
 
       // Obtaining all the last writes
       for (auto j: Addr2LastStore->Collect(b.Addr[2], b.Addr[3])) {
         if (j.type == COVERED_SEGMENT) {
-          printf("\t* the %d-th execution of\n\t  instruction %d, %s\n\t  from thread %lu\n",
-            j.value.Cnt, j.value.ID, Ins[j.value.ID].Code.c_str(), j.value.TID);
+          // printf("\t* the %d-th execution of\n\t  instruction %d, %s\n\t  from thread %lu\n",
+          //   j.value.Cnt, j.value.ID, Ins[j.value.ID].Code.c_str(), j.value.TID);
           fprintf(output_file, "%lu %d %d %lu %d %d\n",
             dyn_inst.TID, dyn_inst.ID, dyn_inst.Cnt,
             j.value.TID, j.value.ID, j.value.Cnt);
@@ -172,8 +172,8 @@ void ExtractMemoryDependency(char *merged_trace_file_name, char *output_file_nam
     } else if (b.Type == SmallestBlock::ExternalCallBlock || b.Type == SmallestBlock::ImpactfulCallBlock) {
       uint32_t ins_id = BB2Ins[b.BBID][b.Start];
       DynamicInst dyn_inst = DynamicInst(b.TID, ins_id, InstCount[I(b.TID, ins_id)]++);
-      printf("The %d-th execution of\n\tinstruction %d, %s\n\tfrom thread %lu is depended on:\n",
-        dyn_inst.Cnt, dyn_inst.ID, Ins[dyn_inst.ID].Code.c_str(), dyn_inst.TID);
+      // printf("The %d-th execution of\n\tinstruction %d, %s\n\tfrom thread %lu is depended on:\n",
+      //   dyn_inst.Cnt, dyn_inst.ID, Ins[dyn_inst.ID].Code.c_str(), dyn_inst.TID);
 
       // All the memory addresses of a group are assumed to be accessed,
       // if one of them is passed as an argument.
@@ -184,8 +184,8 @@ void ExtractMemoryDependency(char *merged_trace_file_name, char *output_file_nam
           if (i.type == COVERED_SEGMENT) {
             for (auto j: Addr2LastStore->Collect(i.left, i.right)) {
               if (j.type == COVERED_SEGMENT) {
-                printf("\t* the %d-th execution of\n\t  instruction %d, %s\n\t  from thread %lu\n",
-                  j.value.Cnt, j.value.ID, Ins[j.value.ID].Code.c_str(), j.value.TID);
+                // printf("\t* the %d-th execution of\n\t  instruction %d, %s\n\t  from thread %lu\n",
+                //   j.value.Cnt, j.value.ID, Ins[j.value.ID].Code.c_str(), j.value.TID);
                 fprintf(output_file, "%lu %d %d %lu %d %d\n",
                   dyn_inst.TID, dyn_inst.ID, dyn_inst.Cnt,
                   j.value.TID, j.value.ID, j.value.Cnt);
@@ -363,10 +363,10 @@ void GroupMemory(char *merged_trace_file_name, char *output_file_name) {
     }
   }
 
-  auto cur = Addr2Group->Collect(0, SegmentTree<int>::MAX_RANGE);
-  for (auto i: cur) {
-    printf("[%lx,%lx): %d %d\n", i.left, i.right, i.type, i.value);
-  }
+  // auto cur = Addr2Group->Collect(0, SegmentTree<int>::MAX_RANGE);
+  // for (auto i: cur) {
+  //   printf("[%lx,%lx): %d %d\n", i.left, i.right, i.type, i.value);
+  // }
 
   ExtractMemoryDependency(merged_trace_file_name, output_file_name);
 }
