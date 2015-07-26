@@ -13,17 +13,23 @@ vector<vector<uint32_t> > BB2Ins;
 ///
 map<DynamicInst, vector<DynamicInst> > MemDependencies;
 void LoadMemDependency(char *mem_dependencies_file_name, map<DynamicInst, vector<DynamicInst> >& mem_dependencies) {
-  FILE *f = fopen(mem_dependencies_file_name, "r");
+  // FILE *f = fopen(mem_dependencies_file_name, "r");
   map<DynamicInst, vector<DynamicInst> > tmp;
+  IterOnCompressedData iter(mem_dependencies_file_name);
   DynamicInst a, b;
   while (true) {
-    fscanf(f, "%lu%d%d%lu%d%d", &a.TID, &a.ID, &a.Cnt, &b.TID, &b.ID, &b.Cnt);
+    iter.Next(&a, sizeof(a));
+    iter.Next(&b, sizeof(b));
+    // fscanf(f, "%lu%d%d%lu%d%d", &a.TID, &a.ID, &a.Cnt, &b.TID, &b.ID, &b.Cnt);
     if (a.TID == 0 && a.ID == -1 && a.Cnt == -1) break;
     tmp[a].push_back(b);
   }
   uint64_t tid; int32_t id, cnt;
   map<pair<uint64_t, uint32_t>, uint32_t> count;
-  while (fscanf(f, "%lu%d%d", &tid, &id, &cnt) != EOF) {
+  // while (fscanf(f, "%lu%d%d", &tid, &id, &cnt) != EOF) {
+  while (iter.Next(&tid, sizeof(tid))) {
+    iter.Next(&id, sizeof(id));
+    iter.Next(&cnt, sizeof(cnt));
     count[I(tid, id)] = cnt - 1;
   }
 

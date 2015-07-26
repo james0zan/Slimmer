@@ -99,11 +99,11 @@ int Merging(set<int> groups) {
 /// \param output_file_name - the path to output file.
 ///
 void ExtractMemoryDependency(char *merged_trace_file_name, char *output_file_name) {
-  FILE *output_file = fopen(output_file_name, "w");
   SegmentTree<DynamicInst> *Addr2LastStore= SegmentTree<DynamicInst>::NewTree();
   map<pair<uint64_t, uint32_t>, uint32_t > InstCount;
   map<uint64_t, set<uint32_t> > ArgGroup;
 
+  CompressBuffer output(output_file_name);
   SmallestBlockIter iter(merged_trace_file_name);
   SmallestBlock b;
   while (iter.NextSmallestBlock(b)) {
@@ -126,9 +126,8 @@ void ExtractMemoryDependency(char *merged_trace_file_name, char *output_file_nam
           if (j.type == COVERED_SEGMENT) {
             // printf("\t* the %d-th execution of\n\t  instruction %d, %s\n\t  from thread %lu\n",
             //   j.value.Cnt, j.value.ID, Ins[j.value.ID].Code.c_str(), j.value.TID);
-            fprintf(output_file, "%lu %d %d %lu %d %d\n",
-              dyn_inst.TID, dyn_inst.ID, dyn_inst.Cnt,
-              j.value.TID, j.value.ID, j.value.Cnt);
+            output.Append((void*)&dyn_inst, sizeof(dyn_inst));
+            output.Append((void*)&(j.value), sizeof(j.value));
           }
         }
 
@@ -159,9 +158,8 @@ void ExtractMemoryDependency(char *merged_trace_file_name, char *output_file_nam
         if (j.type == COVERED_SEGMENT) {
           // printf("\t* the %d-th execution of\n\t  instruction %d, %s\n\t  from thread %lu\n",
           //   j.value.Cnt, j.value.ID, Ins[j.value.ID].Code.c_str(), j.value.TID);
-          fprintf(output_file, "%lu %d %d %lu %d %d\n",
-            dyn_inst.TID, dyn_inst.ID, dyn_inst.Cnt,
-            j.value.TID, j.value.ID, j.value.Cnt);
+          output.Append((void*)&dyn_inst, sizeof(dyn_inst));
+          output.Append((void*)&(j.value), sizeof(j.value));
         }
       }
 
@@ -184,9 +182,8 @@ void ExtractMemoryDependency(char *merged_trace_file_name, char *output_file_nam
               if (j.type == COVERED_SEGMENT) {
                 // printf("\t* the %d-th execution of\n\t  instruction %d, %s\n\t  from thread %lu\n",
                 //   j.value.Cnt, j.value.ID, Ins[j.value.ID].Code.c_str(), j.value.TID);
-                fprintf(output_file, "%lu %d %d %lu %d %d\n",
-                  dyn_inst.TID, dyn_inst.ID, dyn_inst.Cnt,
-                  j.value.TID, j.value.ID, j.value.Cnt);
+                output.Append((void*)&dyn_inst, sizeof(dyn_inst));
+                output.Append((void*)&(j.value), sizeof(j.value));
               }
             }
             // Do not depended on an external call, even if it writes the memory
@@ -197,10 +194,14 @@ void ExtractMemoryDependency(char *merged_trace_file_name, char *output_file_nam
     }
   }
 
-  fprintf(output_file, "0 -1 -1 0 -1 -1\n"); // Line of demarcation
+  DynamicInst _tmp(0, -1, -1);
+  output.Append(&_tmp, sizeof(_tmp));
+  output.Append(&_tmp, sizeof(_tmp)); // Line of demarcation
   for (auto i: InstCount) {
     // printf("Thread %lu has executed instruction %d %d-th\n", i.first.first, i.first.second, i.second);
-    fprintf(output_file, "%lu %d %d\n", i.first.first, i.first.second, i.second);
+    output.Append((void*)&(i.first.first), sizeof(i.first.first));
+    output.Append((void*)&(i.first.second), sizeof(i.first.second));
+    output.Append((void*)&(i.second), sizeof(i.second));
   }
   delete Addr2Group;
   delete Addr2LastStore;
@@ -208,7 +209,6 @@ void ExtractMemoryDependency(char *merged_trace_file_name, char *output_file_nam
     delete i.second;
   }
   Group2Addr.clear();
-  fclose(output_file);
 }
 
 

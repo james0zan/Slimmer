@@ -383,4 +383,83 @@ struct SmallestBlockBackwardIter {
   }
 };
 
+class CompressBuffer {
+public:
+  CompressBuffer(const char *path) {
+    size = COMPRESS_BLOCK_SIZE;
+
+    buffer = (char *)malloc(size);
+    compressed = (char *)malloc(LZ4_compressBound(size));
+    assert(buffer && compressed && "Failed to malloc the MemoryDependencyBuffer!\n");
+
+    stream = fopen(path, "wb");
+    assert(stream && "Failed to open tracing file!\n");
+    offset = 0;
+  }
+
+  void Append(void *ptr, size_t len) {
+    if (offset + len > size) {
+      uint64_t after_compress = LZ4_compress_limitedOutput((const char *)buffer, (char *)compressed, offset, LZ4_compressBound(size));
+      fwrite(&after_compress, sizeof(after_compress), 1, stream);
+      size_t cur = 0;
+      while (cur < after_compress) {
+        size_t tmp = fwrite(compressed + cur, 1, after_compress - cur, stream);
+        if (tmp > 0) cur += tmp;
+      }
+      fwrite(&after_compress, sizeof(after_compress), 1, stream);
+      offset = 0;
+    }
+    memcpy(buffer + offset, ptr, len);
+    offset += len;
+  }
+
+  ~CompressBuffer() {
+    uint64_t after_compress = LZ4_compress_limitedOutput((const char *)buffer, (char *)compressed, offset, LZ4_compressBound(size));
+    fwrite(&after_compress, sizeof(after_compress), 1, stream);
+    size_t cur = 0;
+    while (cur < after_compress) {
+      size_t tmp = fwrite(compressed + cur, 1, after_compress - cur, stream);
+      if (tmp > 0) cur += tmp;
+    }
+    fwrite(&after_compress, sizeof(after_compress), 1, stream);
+    fclose(stream);
+  }
+
+private:
+  char *buffer, *compressed;
+  FILE* stream;
+  size_t offset;
+  size_t size; // Size of the event buffer in bytes
+};
+
+struct IterOnCompressedData {
+  boost::iostreams::mapped_file_source trace;
+  const char* data;
+  char *decoded;
+  size_t data_iter, decoded_iter, decoded_size;
+
+  IterOnCompressedData(char *trace_file_name) : trace(trace_file_name) {
+    data = trace.data();
+    decoded = (char *)malloc(COMPRESS_BLOCK_SIZE);
+    data_iter = decoded_iter = decoded_size = 0;
+  }
+
+  bool Next(void *ptr, size_t len) {
+    if (decoded_iter >= decoded_size) {
+      if (data_iter >= trace.size()) return false; // Trace is ended
+      uint64_t length = (*(uint64_t *)(&data[data_iter]));
+      data_iter += sizeof(uint64_t);
+
+      decoded_size = LZ4_decompress_safe ((const char*) &data[data_iter], decoded, length, COMPRESS_BLOCK_SIZE);
+      assert(decoded_size > 0);
+      decoded_iter = 0;
+
+      data_iter += length + sizeof(uint64_t);
+    }
+    memcpy(ptr, decoded + decoded_iter, len);
+    decoded_iter += len;
+    return true;
+  }
+};
+
 #endif // SLIMMER_TOOLS_H
