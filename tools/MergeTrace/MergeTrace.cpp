@@ -41,9 +41,8 @@ void ExtractImpactfulFunCall(
           fun_ptr = (uint64_t *)(&buffer[cur + 65]);
           cur += 130;
           // printf("ReturnEvent %lu %p\n", *tid_ptr, (void*)*fun_ptr);
-          if (fun_stack[*tid_ptr].top().first != (*fun_ptr)) {
-            puts("ERROR!");
-          }
+          while (!fun_stack[*tid_ptr].empty() && fun_stack[*tid_ptr].top().first != (*fun_ptr))
+            fun_stack[*tid_ptr].pop();
           if (!fun_stack[*tid_ptr].empty())
             fun_stack[*tid_ptr].pop();
           break;

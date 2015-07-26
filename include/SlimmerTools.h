@@ -287,7 +287,6 @@ public:
         if (tmp > 0) cur += tmp;
       }
       fwrite(&after_compress, sizeof(after_compress), 1, stream);
-      printf("after_compress: %lu\n", after_compress);
       offset = 0;
     }
     assert(offset + b.Size() <= size);
@@ -305,7 +304,6 @@ public:
       if (tmp > 0) cur += tmp;
     }
     fwrite(&after_compress, sizeof(after_compress), 1, stream);
-    printf("after_compress2: %lu\n", after_compress);
     fclose(stream);
   }
 

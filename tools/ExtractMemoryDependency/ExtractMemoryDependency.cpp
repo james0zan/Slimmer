@@ -100,13 +100,12 @@ int Merging(set<int> groups) {
 ///
 void ExtractMemoryDependency(char *merged_trace_file_name, char *output_file_name) {
   FILE *output_file = fopen(output_file_name, "w");
-  SmallestBlockIter iter(merged_trace_file_name);
-  SmallestBlock b;
-
   SegmentTree<DynamicInst> *Addr2LastStore= SegmentTree<DynamicInst>::NewTree();
   map<pair<uint64_t, uint32_t>, uint32_t > InstCount;
   map<uint64_t, set<uint32_t> > ArgGroup;
 
+  SmallestBlockIter iter(merged_trace_file_name);
+  SmallestBlock b;
   while (iter.NextSmallestBlock(b)) {
 
     if (b.Type == SmallestBlock::MemoryAccessBlock) {
@@ -315,8 +314,8 @@ void GroupMemory(char *merged_trace_file_name, char *output_file_name) {
   Group2Addr.clear();
   MaxGroupID = 0;
 
-  SmallestBlockBackwardIter iter(merged_trace_file_name);
   set<int> shoud_merge;
+  SmallestBlockBackwardIter iter(merged_trace_file_name);
   SmallestBlock b;
   while (iter.FormerSmallestBlock(b)) {
 

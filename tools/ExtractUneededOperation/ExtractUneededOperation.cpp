@@ -174,17 +174,15 @@ bool isReturnVoid(string code) {
 /// \param output_file_name - the path to output file.
 ///
 void ExtractUneededOperation(char *merged_trace_file_name, char *output_file_name) {
-  boost::iostreams::mapped_file_source trace(merged_trace_file_name);
-  auto data = trace.data();
-
   set<pair<uint64_t, uint32_t> > needed;
   set<DynamicInst> mem_depended;
   map<pair<uint64_t, uint32_t>, int32_t> InstCount;
   map<uint64_t, stack<bool> > fun_used;
   map<uint64_t, stack<pair<uint32_t, bool> > > bb_used;
 
-  for (int64_t cur = trace.size(); cur > 0;) {
-    SmallestBlock b; b.ReadBack(data, cur);
+  SmallestBlockBackwardIter iter(merged_trace_file_name);
+  SmallestBlock b;
+  while (iter.FormerSmallestBlock(b)) {
     b.Print(Ins, BB2Ins);
     
     if (b.IsLast > 0) {
