@@ -137,6 +137,10 @@ struct SmallestBlock {
     } 
   }
 
+  size_t Size() {
+    return 39 + 8 * Addr.size();
+  }
+
   /// Dump a SmallestBlock to a file.
   ///
   void Dump(FILE* f) {
@@ -165,6 +169,34 @@ struct SmallestBlock {
     fwrite(&addr_size, sizeof(uint32_t), 1, f);
   }
 
+  /// Dump a SmallestBlock to a buffer.
+  ///
+  void Dump(char *from) {
+    uint32_t addr_size = Addr.size();
+    uint8_t type = 0;
+    if (Type == NormalBlock) type = 0;
+    if (Type == MemoryAccessBlock) type = 1;
+    if (Type == ExternalCallBlock) type = 2;
+    if (Type == ImpactfulCallBlock) type = 3;
+    if (Type == MemsetBlock) type = 4;
+    if (Type == MemmoveBlock) type = 5;
+
+    (*(uint32_t *)(from)) = addr_size; from += 4;
+    (*(uint8_t *)(from)) = type; from += 1;
+    (*(uint64_t *)(from)) = TID; from += 8;
+    (*(uint32_t *)(from)) = BBID; from += 4;
+    (*(uint32_t *)(from)) = Start; from += 4;
+    (*(uint32_t *)(from)) = End; from += 4;
+    (*(uint8_t *)(from)) = IsFirst; from += 1;
+    (*(uint32_t *)(from)) = Caller; from += 4;
+    (*(uint8_t *)(from)) = IsLast; from += 1;
+    (*(int32_t *)(from)) = LastBBID; from += 4;
+    for (uint32_t i = 0; i < addr_size; ++i, from += 8) {
+      (*(uint64_t *)(from)) = Addr[i];
+    }
+    (*(uint32_t *)(from)) = addr_size; from += 4;
+  }
+
   /// Read a SmallestBlock from a file.
   ///
   /// \param from - the SmallestBlock is stored start from here
@@ -189,6 +221,7 @@ struct SmallestBlock {
     Caller = (*(uint32_t *)(from)); from += 4;
     IsLast = (*(uint8_t *)(from)); from += 1;
     LastBBID = (*(int32_t *)(from)); from += 4;
+    Addr.clear();
     for (uint32_t i = 0; i < addr_size; ++i, from += 8) {
       Addr.push_back(*(uint64_t *)(from));
     }
@@ -205,11 +238,12 @@ struct SmallestBlock {
   ///
   void ReadBack(const char*& data, int64_t& cur) {    
     cur -= 4; uint32_t addr_size = (*(uint32_t *)(&data[cur])); 
+    Addr.clear();
     for (uint32_t i = 0; i < addr_size; ++i) {
       cur -= 8; Addr.push_back(*(uint64_t *)(&data[cur]));
     }
     reverse(Addr.begin(),Addr.end()); 
-    
+
     cur -= 4; LastBBID = (*(int32_t *)(&data[cur])); 
     cur -= 1; IsLast = (*(uint8_t *)(&data[cur])); 
     cur -= 4; Caller = (*(uint32_t *)(&data[cur])); 
@@ -226,6 +260,128 @@ struct SmallestBlock {
     if (type == 4) Type = MemsetBlock;
     if (type == 5) Type = MemmoveBlock;
     cur -= 4;
+  }
+};
+
+class SmallestBlockTrace {
+public:
+  SmallestBlockTrace(const char *path) {
+    size = COMPRESS_BLOCK_SIZE;
+
+    buffer = (char *)malloc(size);
+    compressed = (char *)malloc(LZ4_compressBound(size));
+    assert(buffer && compressed && "Failed to malloc the SmallestBlockTrace!\n");
+
+    stream = fopen(path, "wb");
+    assert(stream && "Failed to open tracing file!\n");
+    offset = 0;
+  }
+
+  void Append(SmallestBlock& b) {
+    if (offset + b.Size() > size) {
+      uint64_t after_compress = LZ4_compress_limitedOutput((const char *)buffer, (char *)compressed, offset, LZ4_compressBound(size));
+      fwrite(&after_compress, sizeof(after_compress), 1, stream);
+      size_t cur = 0;
+      while (cur < after_compress) {
+        size_t tmp = fwrite(compressed + cur, 1, after_compress - cur, stream);
+        if (tmp > 0) cur += tmp;
+      }
+      fwrite(&after_compress, sizeof(after_compress), 1, stream);
+      printf("after_compress: %lu\n", after_compress);
+      offset = 0;
+    }
+    assert(offset + b.Size() <= size);
+
+    b.Dump(buffer + offset);
+    offset += b.Size();
+  }
+
+  ~SmallestBlockTrace() {
+    uint64_t after_compress = LZ4_compress_limitedOutput((const char *)buffer, (char *)compressed, offset, LZ4_compressBound(size));
+    fwrite(&after_compress, sizeof(after_compress), 1, stream);
+    size_t cur = 0;
+    while (cur < after_compress) {
+      size_t tmp = fwrite(compressed + cur, 1, after_compress - cur, stream);
+      if (tmp > 0) cur += tmp;
+    }
+    fwrite(&after_compress, sizeof(after_compress), 1, stream);
+    printf("after_compress2: %lu\n", after_compress);
+    fclose(stream);
+  }
+
+private:
+  char *buffer, *compressed;
+  FILE* stream;
+  size_t offset;
+  size_t size; // Size of the event buffer in bytes
+};
+
+/// An iterator for the compressed trace data.
+struct SmallestBlockIter {
+  boost::iostreams::mapped_file_source trace;
+  const char* data;
+  char *decoded;
+  size_t data_iter, decoded_iter, decoded_size;
+
+  SmallestBlockIter(char *trace_file_name) : trace(trace_file_name) {
+    data = trace.data();
+    decoded = (char *)malloc(COMPRESS_BLOCK_SIZE);
+    data_iter = decoded_iter = decoded_size = 0;
+  }
+
+  /// Obtain the next SmallestBlock.
+  ///
+  /// \param * - stores the corresponding field of the next event.
+  /// \return - return false if the trace is ended.
+  ///
+  bool NextSmallestBlock(SmallestBlock& b) {
+    if (decoded_iter >= decoded_size) {
+      if (data_iter >= trace.size()) return false; // Trace is ended
+      uint64_t length = (*(uint64_t *)(&data[data_iter]));
+      data_iter += sizeof(uint64_t);
+
+      decoded_size = LZ4_decompress_safe ((const char*) &data[data_iter], decoded, length, COMPRESS_BLOCK_SIZE);
+      assert(decoded_size > 0);
+      decoded_iter = 0;
+
+      data_iter += length + sizeof(uint64_t);
+    }
+    const char *cur = decoded + decoded_iter;
+    decoded_iter += b.ReadFrom(cur);
+    return true;
+  }
+};
+
+struct SmallestBlockBackwardIter {
+  boost::iostreams::mapped_file_source trace;
+  const char* data;
+  char *decoded;
+  int64_t data_iter, decoded_iter, decoded_size;
+
+  SmallestBlockBackwardIter(char *trace_file_name) : trace(trace_file_name) {
+    data = trace.data();
+    decoded = (char *)malloc(COMPRESS_BLOCK_SIZE);
+    data_iter = trace.size();
+    decoded_iter = -1;
+    decoded_size = 0;
+  }
+
+  bool FormerSmallestBlock(SmallestBlock& b) {
+    if (decoded_iter <= 0) {
+      if (data_iter <= 0) return false; // Trace is ended
+      data_iter -= sizeof(uint64_t);
+      uint64_t length = (*(uint64_t *)(&data[data_iter]));
+      data_iter -= length;
+
+      decoded_size = LZ4_decompress_safe((const char*) &data[data_iter], decoded, length, COMPRESS_BLOCK_SIZE);
+      decoded_iter = decoded_size;
+
+      data_iter -= sizeof(uint64_t);
+    }
+
+    const char* tmp = decoded;
+    b.ReadBack(tmp, decoded_iter);
+    return true;
   }
 };
 

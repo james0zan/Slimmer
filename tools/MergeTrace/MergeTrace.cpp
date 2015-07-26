@@ -41,8 +41,11 @@ void ExtractImpactfulFunCall(
           fun_ptr = (uint64_t *)(&buffer[cur + 65]);
           cur += 130;
           // printf("ReturnEvent %lu %p\n", *tid_ptr, (void*)*fun_ptr);
-          assert(fun_stack[*tid_ptr].top().first == (*fun_ptr));
-          fun_stack[*tid_ptr].pop();
+          if (fun_stack[*tid_ptr].top().first != (*fun_ptr)) {
+            puts("ERROR!");
+          }
+          if (!fun_stack[*tid_ptr].empty())
+            fun_stack[*tid_ptr].pop();
           break;
         case SyscallEventLabel:
           tid_ptr = (uint64_t *)(&buffer[cur + 1]);
@@ -93,8 +96,7 @@ void MergeTrace(
   vector<vector<uint32_t> > BB2Ins;
   LoadInstInfo(inst_file, Ins, BB2Ins);
   
-  FILE* dump = fopen(output_file_name, "wb");
-  assert(dump && "Cannot open the output file!");
+  SmallestBlockTrace dump(output_file_name);
 
   char event_label;
   const uint64_t *tid_ptr, *length_ptr, *addr_ptr, *addr2_ptr;
@@ -175,7 +177,7 @@ void MergeTrace(
       b.Addr.push_back(*addr_ptr);  b.Addr.push_back(*addr_ptr + *length_ptr);
       is_first[*tid_ptr] = make_pair((uint8_t)0, (uint32_t)0);
       // b.Print(Ins, BB2Ins);
-      b.Dump(dump);
+      dump.Append(b);
     } else if (event_label == ReturnEventLabel) {
       StackInfo& info = call_stack[*tid_ptr].back();
       uint32_t ins_id = BB2Ins[info.BBID][info.CurIndex++];
@@ -194,7 +196,7 @@ void MergeTrace(
       }
       FunCount[I(*tid_ptr, *addr_ptr)]++;
       // b.Print(Ins, BB2Ins);
-      b.Dump(dump);
+      dump.Append(b);
     } else if (event_label == MemsetEventLabel) {
       StackInfo& info = call_stack[*tid_ptr].back();
       uint32_t ins_id = BB2Ins[info.BBID][info.CurIndex++];
@@ -204,7 +206,7 @@ void MergeTrace(
       b.Addr.push_back(*addr_ptr);  b.Addr.push_back(*addr_ptr + *length_ptr);
       is_first[*tid_ptr] = make_pair((uint8_t)0, (uint32_t)0);
       // b.Print(Ins, BB2Ins);
-      b.Dump(dump);
+      dump.Append(b);
     } else if (event_label == MemmoveEventLabel) {
       StackInfo& info = call_stack[*tid_ptr].back();
       uint32_t ins_id = BB2Ins[info.BBID][info.CurIndex++];
@@ -215,7 +217,7 @@ void MergeTrace(
       b.Addr.push_back(*addr2_ptr);  b.Addr.push_back(*addr2_ptr + *length_ptr);
       is_first[*tid_ptr] = make_pair((uint8_t)0, (uint32_t)0);
       // b.Print(Ins, BB2Ins);
-      b.Dump(dump);
+      dump.Append(b);
     } 
 
     while (!call_stack[*tid_ptr].empty()) {
@@ -269,7 +271,7 @@ void MergeTrace(
         }
         is_first[*tid_ptr] = make_pair((uint8_t)0, (uint32_t)0);
         // b.Print(Ins, BB2Ins);
-        b.Dump(dump);
+        dump.Append(b);
       }
       if (!last_bb) break;
     }
@@ -294,10 +296,9 @@ void MergeTrace(
         b.Caller = BB2Ins[last_info.BBID][last_info.CurIndex - 1];
       }
       // b.Print(Ins, BB2Ins);
-      b.Dump(dump);
+      dump.Append(b);
     }
   }
-  fclose(dump);
 }
 
 

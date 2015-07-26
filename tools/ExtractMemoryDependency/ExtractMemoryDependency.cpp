@@ -100,15 +100,14 @@ int Merging(set<int> groups) {
 ///
 void ExtractMemoryDependency(char *merged_trace_file_name, char *output_file_name) {
   FILE *output_file = fopen(output_file_name, "w");
-  boost::iostreams::mapped_file_source trace(merged_trace_file_name);
-  auto data = trace.data();
+  SmallestBlockIter iter(merged_trace_file_name);
+  SmallestBlock b;
 
   SegmentTree<DynamicInst> *Addr2LastStore= SegmentTree<DynamicInst>::NewTree();
   map<pair<uint64_t, uint32_t>, uint32_t > InstCount;
   map<uint64_t, set<uint32_t> > ArgGroup;
 
-  for (size_t cur = 0; cur < trace.size();) {
-    SmallestBlock b; cur += b.ReadFrom(data);
+  while (iter.NextSmallestBlock(b)) {
 
     if (b.Type == SmallestBlock::MemoryAccessBlock) {
       uint32_t ins_id = BB2Ins[b.BBID][b.Start];
@@ -191,7 +190,8 @@ void ExtractMemoryDependency(char *merged_trace_file_name, char *output_file_nam
                   j.value.TID, j.value.ID, j.value.Cnt);
               }
             }
-            Addr2LastStore->Set(i.left, i.right, dyn_inst);
+            // Do not depended on an external call, even if it writes the memory
+            // Addr2LastStore->Set(i.left, i.right, dyn_inst);
           }
         }
       }
@@ -315,11 +315,10 @@ void GroupMemory(char *merged_trace_file_name, char *output_file_name) {
   Group2Addr.clear();
   MaxGroupID = 0;
 
-  boost::iostreams::mapped_file_source trace(merged_trace_file_name);
-  auto data = trace.data();
+  SmallestBlockBackwardIter iter(merged_trace_file_name);
   set<int> shoud_merge;
-  for (int64_t cur = trace.size(); cur > 0;) {
-    SmallestBlock b; b.ReadBack(data, cur);
+  SmallestBlock b;
+  while (iter.FormerSmallestBlock(b)) {
 
     if (b.Type == SmallestBlock::MemoryAccessBlock || b.Type == SmallestBlock::MemsetBlock || b.Type == SmallestBlock::MemmoveBlock) {
       if (b.Addr[0] >= b.Addr[1]) continue; // Inefficacious write

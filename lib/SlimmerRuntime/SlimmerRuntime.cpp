@@ -347,7 +347,7 @@ void recordStoreEvent(uint32_t id, void *addr, uint64_t length, int64_t value) {
 ///
 __attribute__((always_inline))
 void recordReturnEvent(uint32_t id, void *fun) {
-  DEBUG("[ReturnEvent] id = %u, fun = %p\n", id, fun);
+  DEBUG("[ReturnEvent] tid = %lu id = %u, fun = %p clock()=%lu\n", local_tid, id, fun, (uint64_t)clock());
 
   char *buffer = event_buffer.StartAppend(SizeOfReturnEvent);
 

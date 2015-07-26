@@ -1,13 +1,22 @@
 #include <stdio.h>
-#include <stdint.h>
-#include <string.h>
 
-#define CAS(x,y,z) __atomic_compare_exchange_n(x,y,z,true,0,0)
+const char *format = "XXXXXXXX%d %p %p\n";
+struct X {
+  int a, b;
+};
 
-int main() {
-  int x = 0;
-  int cmp = 0, val = 1;
-  CAS(&x,&cmp,val); // if (z == x) z = &y;
-  printf("%d\n", x);
-  return 0;
+void Foo(X* tmp) {
+  printf("%p\n", tmp);
+  tmp->b = 2;
+}
+
+int main(void) {
+  X tmp;
+  tmp.a = 1;
+  Foo(&tmp);
+  int c = 1;
+  printf(format, tmp.a, format, &tmp);
+  
+  // int a = 1;
+  // printf("%d\n", a);
 }
