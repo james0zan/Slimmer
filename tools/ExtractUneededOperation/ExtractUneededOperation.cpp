@@ -136,15 +136,31 @@ void PreparePostDominator(char *bbgraph_file_name,
 ///
 void OneInstruction(bool is_needed, DynamicInst dyn_ins, int32_t last_bb_id,
                     set<pair<uint64_t, uint32_t> > &needed,
-                    set<DynamicInst> &mem_depended) {
+                    set<DynamicInst> &mem_depended,
+                    CompressBuffer& uneeded_graph,
+                    map<DynamicInst, set<DynamicInst> >& unneeded_mem_dep,
+                    map<pair<uint64_t, uint32_t>, set<DynamicInst> >& unneeded_dep) {
   if (!is_needed) {
     printf("!!!The last %d-th execution of\n  instruction %d, %s\n  from "
            "thread %lu is uneeded.\n",
            dyn_ins.Cnt, dyn_ins.ID, Ins[dyn_ins.ID].Code.c_str(), dyn_ins.TID);
-    return;
+    // return;
+
+    uneeded_graph.Append((void *)&(dyn_ins.ID), sizeof(dyn_ins.ID));
+    set<DynamicInst> _tmp(unneeded_dep[I(dyn_ins.TID, dyn_ins.ID)]);
+    _tmp.insert(unneeded_mem_dep[dyn_ins].begin(), unneeded_mem_dep[dyn_ins].end());
+    uint32_t cnt = _tmp.size();
+    uneeded_graph.Append((void *)&cnt, sizeof(cnt));
+    for (auto& i: _tmp) {
+      uneeded_graph.Append((void *)&(i.ID), sizeof(i.ID));
+    }
   }
 
   needed.erase(I(dyn_ins.TID, dyn_ins.ID));
+  mem_depended.erase(dyn_ins);
+  unneeded_dep.erase(I(dyn_ins.TID, dyn_ins.ID));
+  unneeded_mem_dep.erase(dyn_ins);
+
   // printf("The last %d-th execution of\n  instruction %d, %s\n  from thread
   // %lu is depended on:\n",
   //   dyn_ins.Cnt, dyn_ins.ID, Ins[dyn_ins.ID].Code.c_str(), dyn_ins.TID);
@@ -155,7 +171,11 @@ void OneInstruction(bool is_needed, DynamicInst dyn_ins, int32_t last_bb_id,
       // printf("  * the last execution of\n\tinstruction %d, %s\n\tfrom thread
       // %lu\n",
       //   dep.second, Ins[dep.second].Code.c_str(), dyn_ins.TID);
-      needed.insert(I(dyn_ins.TID, dep.second));
+      if (is_needed) {
+        needed.insert(I(dyn_ins.TID, dep.second));
+      } else {
+        unneeded_dep[I(dyn_ins.TID, dep.second)].insert(dyn_ins);
+      }
     } else if (dep.first == InstInfo::Arg ||
                dep.first == InstInfo::PointerArg) {
       // TODO
@@ -164,7 +184,11 @@ void OneInstruction(bool is_needed, DynamicInst dyn_ins, int32_t last_bb_id,
 
   // Memory dependencies
   for (auto dep : MemDependencies[dyn_ins]) {
-    mem_depended.insert(dep);
+    if (is_needed) {
+      mem_depended.insert(dep);
+    } else {
+      unneeded_mem_dep[dep].insert(dyn_ins);
+    }
     // printf("  * the last %d-th execution of\n\tinstruction %d, %s\n\tfrom
     // thread %lu\n",
     //   dep.Cnt, dep.ID, Ins[dep.ID].Code.c_str(), dep.TID);
@@ -177,7 +201,11 @@ void OneInstruction(bool is_needed, DynamicInst dyn_ins, int32_t last_bb_id,
         // printf("  * the last execution of\n\tinstruction %d, %s\n\tfrom
         // thread %lu\n",
         //   get<2>(phi_dep), Ins[get<2>(phi_dep)].Code.c_str(), dyn_ins.TID);
-        needed.insert(I(dyn_ins.TID, get<2>(phi_dep)));
+        if (is_needed) {
+          needed.insert(I(dyn_ins.TID, get<2>(phi_dep)));
+        } else {
+          unneeded_dep[I(dyn_ins.TID, get<2>(phi_dep))].insert(dyn_ins);
+        }
       } else if (get<1>(phi_dep) == InstInfo::Arg ||
                  get<1>(phi_dep) == InstInfo::PointerArg) {
         // TODO
@@ -213,10 +241,14 @@ void ExtractUneededOperation(char *merged_trace_file_name,
   map<uint64_t, stack<bool> > fun_used;
   map<uint64_t, stack<pair<uint32_t, bool> > > bb_used;
 
+  CompressBuffer uneeded_graph("/scratch1/zhangmx/SlimmerUneeded");
+  map<DynamicInst, set<DynamicInst> > unneeded_mem_dep;
+  map<pair<uint64_t, uint32_t>, set<DynamicInst> > unneeded_dep;
+
   BackwardTraceIter iter(merged_trace_file_name);
   SmallestBlock b;
   while (iter.FormerSmallestBlock(b)) {
-    b.Print(Ins, BB2Ins);
+    // b.Print(Ins, BB2Ins);
 
     if (b.IsLast > 0) {
       fun_used[b.TID].push(false);
@@ -227,7 +259,8 @@ void ExtractUneededOperation(char *merged_trace_file_name,
     if (b.Type == SmallestBlock::ImpactfulCallBlock) {
       DynamicInst dyn_ins(b.TID, BB2Ins[b.BBID][b.Start],
                           -InstCount[I(b.TID, BB2Ins[b.BBID][b.Start])]);
-      OneInstruction(true, dyn_ins, b.LastBBID, needed, mem_depended);
+      OneInstruction(true, dyn_ins, b.LastBBID, needed, mem_depended,
+        uneeded_graph, unneeded_mem_dep, unneeded_dep);
       InstCount[I(dyn_ins.TID, dyn_ins.ID)]++;
 
       fun_used[b.TID].top() = true;
@@ -240,8 +273,8 @@ void ExtractUneededOperation(char *merged_trace_file_name,
                           -InstCount[I(b.TID, BB2Ins[b.BBID][b.Start])]);
       bool is_needed = ((needed.count(I(dyn_ins.TID, dyn_ins.ID)) > 0) ||
                         (mem_depended.count(dyn_ins) > 0));
-      OneInstruction(is_needed, dyn_ins, b.LastBBID, needed, mem_depended);
-      mem_depended.erase(dyn_ins);
+      OneInstruction(is_needed, dyn_ins, b.LastBBID, needed, mem_depended,
+        uneeded_graph, unneeded_mem_dep, unneeded_dep);
       InstCount[I(dyn_ins.TID, dyn_ins.ID)]++;
 
       fun_used[b.TID].top() |= is_needed;
@@ -269,7 +302,8 @@ void ExtractUneededOperation(char *merged_trace_file_name,
           }
         }
 
-        OneInstruction(is_needed, dyn_ins, b.LastBBID, needed, mem_depended);
+        OneInstruction(is_needed, dyn_ins, b.LastBBID, needed, mem_depended,
+          uneeded_graph, unneeded_mem_dep, unneeded_dep);
         InstCount[I(dyn_ins.TID, dyn_ins.ID)]++;
         fun_used[b.TID].top() |= is_needed;
         this_bb_used |= is_needed;

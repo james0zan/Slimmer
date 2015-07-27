@@ -1,22 +1,17 @@
+//===----------------------------------------------------------------------===//
+//  This is a simple version of GCC#57812,
+//  in which the later part of a loop
+//  is unused.
+//===----------------------------------------------------------------------===//
+
 #include <stdio.h>
 
-const char *format = "XXXXXXXX%d %p %p\n";
-struct X {
-  int a, b;
-};
-
-void Foo(X* tmp) {
-  printf("%p\n", tmp);
-  tmp->b = 2;
-}
-
-int main(void) {
-  X tmp;
-  tmp.a = 1;
-  Foo(&tmp);
-  int c = 1;
-  printf(format, tmp.a, format, &tmp);
-  
-  // int a = 1;
-  // printf("%d\n", a);
+int main() {
+  bool flag = false;
+  for (int i = 0; i < 4; ++i) {
+    if (i == 2) {
+      flag = true;
+    }
+  }
+  printf("%d\n", flag);
 }
