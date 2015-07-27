@@ -8,7 +8,7 @@ using namespace std;
 /// \param path - the path to the InstrumentedFun file.
 /// \param instrumented - the set that reserves all the instrumented functions.
 ///
-void LoadInstrumentedFun(string path, set<string>& instrumented) {
+void LoadInstrumentedFun(string path, set<string> &instrumented) {
   ifstream file(path);
   string name;
   while (file >> name) {
@@ -22,7 +22,8 @@ void LoadInstrumentedFun(string path, set<string>& instrumented) {
 /// \param info - the vector that reserves all the instruction infomation.
 /// \param bb2ins - map a basic block ID to all the instructions it reserve.
 ///
-void LoadInstInfo(string path, vector<InstInfo>& info, vector<vector<uint32_t> >& bb2ins) {
+void LoadInstInfo(string path, vector<InstInfo> &info,
+                  vector<vector<uint32_t> > &bb2ins) {
   ifstream file(path);
   string tmp;
   int cnt, x;
@@ -30,8 +31,9 @@ void LoadInstInfo(string path, vector<InstInfo>& info, vector<vector<uint32_t> >
     InstInfo ins;
     ins.ID = x;
     file >> ins.BB >> ins.IsPointer >> ins.LoC;
-    
-    if (ins.BB >= bb2ins.size()) bb2ins.resize(ins.BB + 1);
+
+    if (ins.BB >= bb2ins.size())
+      bb2ins.resize(ins.BB + 1);
     bb2ins[ins.BB].push_back(ins.ID);
 
     file >> ins.File;
@@ -40,7 +42,8 @@ void LoadInstInfo(string path, vector<InstInfo>& info, vector<vector<uint32_t> >
     file >> ins.Code;
     ins.Code = base64_decode(ins.Code);
 
-    // printf("%d:\n\t%d\n\t%d\n\t%d\n\t%s\n\t%s\n", ins.ID, ins.BB, ins.IsPointer, ins.LoC, ins.File.c_str(), ins.Code.c_str());
+    // printf("%d:\n\t%d\n\t%d\n\t%d\n\t%s\n\t%s\n", ins.ID, ins.BB,
+    // ins.IsPointer, ins.LoC, ins.File.c_str(), ins.Code.c_str());
     file >> cnt;
     while (cnt--) {
       file >> tmp >> x;
@@ -48,11 +51,11 @@ void LoadInstInfo(string path, vector<InstInfo>& info, vector<vector<uint32_t> >
         ins.SSADependencies.push_back(make_pair(InstInfo::Inst, x));
       } else if (tmp == "PointerArg") {
         ins.SSADependencies.push_back(make_pair(InstInfo::PointerArg, x));
-      }  else if (tmp == "Arg") {
+      } else if (tmp == "Arg") {
         ins.SSADependencies.push_back(make_pair(InstInfo::Arg, x));
       } else {
         ins.SSADependencies.push_back(make_pair(InstInfo::Constant, x));
-      } 
+      }
     }
     // printf("\t");
     // for (auto i: ins.SSADependencies) {
@@ -62,7 +65,7 @@ void LoadInstInfo(string path, vector<InstInfo>& info, vector<vector<uint32_t> >
     //     printf("Arg %d ", i.second);
     //   } else {
     //     printf("Constant ");
-    //   } 
+    //   }
     // }
     // printf("\n");
 
@@ -89,9 +92,11 @@ void LoadInstInfo(string path, vector<InstInfo>& info, vector<vector<uint32_t> >
       ins.Type = InstInfo::VarArg;
     }
 
-    if (ins.Type == InstInfo::CallInst || ins.Type == InstInfo::ExternalCallInst) {
+    if (ins.Type == InstInfo::CallInst ||
+        ins.Type == InstInfo::ExternalCallInst) {
       file >> ins.Fun;
-    } else if (ins.Type == InstInfo::TerminatorInst || ins.Type == InstInfo::ReturnInst) {
+    } else if (ins.Type == InstInfo::TerminatorInst ||
+               ins.Type == InstInfo::ReturnInst) {
       file >> cnt;
       while (cnt--) {
         file >> x;
@@ -126,51 +131,60 @@ void LoadInstInfo(string path, vector<InstInfo>& info, vector<vector<uint32_t> >
 /// \param event_label - the label of the event.
 /// \param *_ptr - the pointer of each fields.
 ///
-int GetEvent(bool backward, const char *cur, 
-  char& event_label, const uint64_t*& tid_ptr, const uint32_t*& id_ptr,
-  const uint64_t*& addr_ptr, const uint64_t*& length_ptr, const uint64_t*& addr2_ptr) {
+int GetEvent(bool backward, const char *cur, char &event_label,
+             const uint64_t *&tid_ptr, const uint32_t *&id_ptr,
+             const uint64_t *&addr_ptr, const uint64_t *&length_ptr,
+             const uint64_t *&addr2_ptr) {
   event_label = (*cur);
 
   switch (event_label) {
-    case EndEventLabel: return 1;
-    case PlaceHolderLabel: return 1;
-    case BasicBlockEventLabel:
-      if (backward) cur -= SizeOfBasicBlockEvent - 1;
-      tid_ptr = (const uint64_t *)(cur + 1);
-      id_ptr = (const uint32_t *)(cur + 9);
-      return SizeOfBasicBlockEvent;
-    case MemoryEventLabel:
-      if (backward) cur -= SizeOfMemoryEvent - 1;
-      tid_ptr = (const uint64_t *)(cur + 1);
-      id_ptr = (const uint32_t *)(cur + 9);
-      addr_ptr = (const uint64_t *)(cur + 13);
-      length_ptr = (const uint64_t *)(cur + 21);
-      return SizeOfMemoryEvent;
-    case ReturnEventLabel:
-      if (backward) cur -= SizeOfReturnEvent - 1;
-      tid_ptr = (const uint64_t *)(cur + 1);
-      id_ptr = (const uint32_t *)(cur + 9);
-      addr_ptr = (const uint64_t *)(cur + 13);
-      return SizeOfReturnEvent;
-    case ArgumentEventLabel:
-      if (backward) cur -= SizeOfArgumentEvent - 1;
-      tid_ptr = (const uint64_t *)(cur + 1);
-      addr_ptr = (const uint64_t *)(cur + 9);\
-      return SizeOfArgumentEvent;
-    case MemsetEventLabel:
-      if (backward) cur -= SizeOfMemsetEvent - 1;
-      tid_ptr = (const uint64_t *)(cur + 1);
-      id_ptr = (const uint32_t *)(cur + 9);
-      addr_ptr = (const uint64_t *)(cur + 13);
-      length_ptr = (const uint64_t *)(cur + 21);
-      return SizeOfMemsetEvent;
-    case MemmoveEventLabel:
-      if (backward) cur -= SizeOfMemmoveEvent - 1;
-      tid_ptr = (const uint64_t *)(cur + 1);
-      id_ptr = (const uint32_t *)(cur + 9);
-      addr_ptr = (const uint64_t *)(cur + 13);
-      addr2_ptr = (const uint64_t *)(cur + 21);
-      length_ptr = (const uint64_t *)(cur + 29);
-      return SizeOfMemmoveEvent;
+  case EndEventLabel:
+    return 1;
+  case PlaceHolderLabel:
+    return 1;
+  case BasicBlockEventLabel:
+    if (backward)
+      cur -= SizeOfBasicBlockEvent - 1;
+    tid_ptr = (const uint64_t *)(cur + 1);
+    id_ptr = (const uint32_t *)(cur + 9);
+    return SizeOfBasicBlockEvent;
+  case MemoryEventLabel:
+    if (backward)
+      cur -= SizeOfMemoryEvent - 1;
+    tid_ptr = (const uint64_t *)(cur + 1);
+    id_ptr = (const uint32_t *)(cur + 9);
+    addr_ptr = (const uint64_t *)(cur + 13);
+    length_ptr = (const uint64_t *)(cur + 21);
+    return SizeOfMemoryEvent;
+  case ReturnEventLabel:
+    if (backward)
+      cur -= SizeOfReturnEvent - 1;
+    tid_ptr = (const uint64_t *)(cur + 1);
+    id_ptr = (const uint32_t *)(cur + 9);
+    addr_ptr = (const uint64_t *)(cur + 13);
+    return SizeOfReturnEvent;
+  case ArgumentEventLabel:
+    if (backward)
+      cur -= SizeOfArgumentEvent - 1;
+    tid_ptr = (const uint64_t *)(cur + 1);
+    addr_ptr = (const uint64_t *)(cur + 9);
+    return SizeOfArgumentEvent;
+  case MemsetEventLabel:
+    if (backward)
+      cur -= SizeOfMemsetEvent - 1;
+    tid_ptr = (const uint64_t *)(cur + 1);
+    id_ptr = (const uint32_t *)(cur + 9);
+    addr_ptr = (const uint64_t *)(cur + 13);
+    length_ptr = (const uint64_t *)(cur + 21);
+    return SizeOfMemsetEvent;
+  case MemmoveEventLabel:
+    if (backward)
+      cur -= SizeOfMemmoveEvent - 1;
+    tid_ptr = (const uint64_t *)(cur + 1);
+    id_ptr = (const uint32_t *)(cur + 9);
+    addr_ptr = (const uint64_t *)(cur + 13);
+    addr2_ptr = (const uint64_t *)(cur + 21);
+    length_ptr = (const uint64_t *)(cur + 29);
+    return SizeOfMemmoveEvent;
   }
 }

@@ -30,7 +30,9 @@
 #ifdef DEBUG_SLIMMER_UTILL
 #define DEBUG(...) fprintf(stderr, __VA_ARGS__)
 #else
-#define DEBUG(...) do {} while (false)
+#define DEBUG(...)                                                             \
+  do {                                                                         \
+  } while (false)
 #endif
 
 #define ERROR(...) fprintf(stderr, __VA_ARGS__)
@@ -38,7 +40,11 @@
 //===----------------------------------------------------------------------===//
 //                           Logging Function
 //===----------------------------------------------------------------------===//
-enum LogLevel {ERROR, INFO, DEBUG};
+enum LogLevel {
+  ERROR,
+  INFO,
+  DEBUG
+};
 extern LogLevel _log_level;
 
 class logIt {
@@ -47,38 +53,37 @@ public:
   void Bar();
 
   logIt(LogLevel log_level, const std::string lable) {
-    _buffer << "[" 
-      << (log_level == ERROR
-        ? "ERROR"
-        : (log_level == INFO ? "INFO" : "DEBUG")) 
-      << "::" << lable << "] ";
+    _buffer << "["
+            << (log_level == ERROR ? "ERROR"
+                                   : (log_level == INFO ? "INFO" : "DEBUG"))
+            << "::" << lable << "] ";
   }
-  
-  template <typename T>
-  logIt & operator<<(T const &value) {
+
+  template <typename T> logIt &operator<<(T const &value) {
     _buffer << value;
     return *this;
   }
-  
+
   ~logIt() {
     _buffer << std::endl;
     std::cerr << _buffer.str();
-    
   }
 
 private:
   std::ostringstream _buffer;
 };
 
-#define LOG(level, lable) \
-if (level > _log_level) ; \
-else logIt(level, lable)
+#define LOG(level, lable)                                                      \
+  if (level > _log_level)                                                      \
+    ;                                                                          \
+  else                                                                         \
+  logIt(level, lable)
 
 //===----------------------------------------------------------------------===//
 //                           Base64 Function
 //===----------------------------------------------------------------------===//
-std::string base64_encode(unsigned char const* , unsigned int len);
-std::string base64_decode(std::string const& s);
+std::string base64_encode(unsigned char const *, unsigned int len);
+std::string base64_decode(std::string const &s);
 
 //===----------------------------------------------------------------------===//
 //                           LLVM Helpers
@@ -89,8 +94,7 @@ namespace llvm {
 /// to pass into type construction of CallInst ctors.  This turns a null
 /// terminated list of pointers (or other value types) into a real live vector.
 ///
-template<typename T>
-inline std::vector<T> make_vector(T A, ...) {
+template <typename T> inline std::vector<T> make_vector(T A, ...) {
   va_list Args;
   va_start(Args, A);
   std::vector<T> Result;
@@ -101,10 +105,9 @@ inline std::vector<T> make_vector(T A, ...) {
   return Result;
 }
 
-GlobalVariable *StringToGV(const std::string& s, Module& module);
+GlobalVariable *StringToGV(const std::string &s, Module &module);
 Value *LLVMCastTo(Value *V, Type *Ty, Twine Name, Instruction *InsertPt);
 bool IsSlimmerFunction(Function *fun);
-
 }
 
 //===----------------------------------------------------------------------===//
@@ -118,18 +121,14 @@ public:
   void Append(const char *event, size_t length);
   ~EventBuffer() { CloseBufferFile(); }
   /// Lock the buffer buffer.
-  inline void Lock() {
-    pthread_spin_lock(&lock);
-  }
+  inline void Lock() { pthread_spin_lock(&lock); }
   /// Unlock the buffer buffer.
-  inline void Unlock() {
-    pthread_spin_unlock(&lock);
-  }
+  inline void Unlock() { pthread_spin_unlock(&lock); }
 
 private:
   bool inited;
   char *buffer, *compressed;
-  FILE* stream;
+  FILE *stream;
   size_t offset;
   size_t size; // Size of the event buffer in bytes
   // the mutex of modifying the EntryBuffer
@@ -160,7 +159,7 @@ const static size_t SizeOfMemoryEvent = SizeOfEventCommon + 2 * 8;
 const static size_t SizeOfReturnEvent = SizeOfEventCommon + 8;
 const static size_t SizeOfArgumentEvent = 2 + 8 + 8;
 const static size_t SizeOfMemsetEvent = SizeOfMemoryEvent;
-const static size_t SizeOfMemmoveEvent = SizeOfEventCommon + 3*8;
+const static size_t SizeOfMemmoveEvent = SizeOfEventCommon + 3 * 8;
 
 #define COMPRESS_BLOCK_CNT 150
 #define COMPRESS_BLOCK_SIZE 33554432lu
@@ -175,12 +174,12 @@ struct InstInfo {
 
   // Is it a pointer or not?
   bool IsPointer;
-  
+
   // The code infomation.
   int LoC;
   std::string File, Code;
-  
-  // SSA dependencies 
+
+  // SSA dependencies
   enum DepType {
     Inst,
     Arg,
@@ -212,9 +211,13 @@ struct InstInfo {
   std::vector<std::tuple<uint32_t, DepType, uint32_t> > PhiDependencies;
 };
 
-int GetEvent(bool backward, const char *cur, char& event_label, const uint64_t*& tid_ptr, const uint32_t*& id_ptr, const uint64_t*& addr_ptr, const uint64_t*& length_ptr, const uint64_t*& addr2_ptr);
-void LoadInstrumentedFun(std::string path, std::set<std::string>& instrumented);
-void LoadInstInfo(std::string path, std::vector<InstInfo>& info, std::vector<std::vector<uint32_t> >& bb2ins);
+int GetEvent(bool backward, const char *cur, char &event_label,
+             const uint64_t *&tid_ptr, const uint32_t *&id_ptr,
+             const uint64_t *&addr_ptr, const uint64_t *&length_ptr,
+             const uint64_t *&addr2_ptr);
+void LoadInstrumentedFun(std::string path, std::set<std::string> &instrumented);
+void LoadInstInfo(std::string path, std::vector<InstInfo> &info,
+                  std::vector<std::vector<uint32_t> > &bb2ins);
 
 //===----------------------------------------------------------------------===//
 //                           Dynamic Instruction
@@ -224,13 +227,16 @@ struct DynamicInst {
   uint64_t TID;
   int32_t ID, Cnt;
   DynamicInst() {}
-  DynamicInst(uint64_t tid, int32_t id, int32_t cnt) : TID(tid), ID(id), Cnt(cnt) {}
-  bool operator==(const DynamicInst& rhs) {
+  DynamicInst(uint64_t tid, int32_t id, int32_t cnt)
+      : TID(tid), ID(id), Cnt(cnt) {}
+  bool operator==(const DynamicInst &rhs) {
     return TID == rhs.TID && ID == rhs.ID && Cnt == rhs.Cnt;
   }
-  bool operator<(const DynamicInst& rhs) const {
-    if (TID != rhs.TID) return TID < rhs.TID;
-    if (ID != rhs.ID) return ID < rhs.ID;
+  bool operator<(const DynamicInst &rhs) const {
+    if (TID != rhs.TID)
+      return TID < rhs.TID;
+    if (ID != rhs.ID)
+      return ID < rhs.ID;
     return Cnt < rhs.Cnt;
   }
 };
