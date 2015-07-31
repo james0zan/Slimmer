@@ -134,7 +134,10 @@ std::string SlimmerTrace::CommonInfo(Instruction *ins) {
   if (MDNode *dbg = ins->getMetadata("dbg")) {
     DILocation loc(dbg);
     rso << "\t" << loc.getLineNumber() << "\n";
-    std::string path = loc.getDirectory().str() + "/" + loc.getFilename().str();
+    std::string path = loc.getFilename().str();
+    if (path.substr(0, 1) != "/") {
+      path = loc.getDirectory().str() + "/" + path;
+    }
     rso << "\t" << base64_encode((unsigned char const *)path.c_str(),
                                  path.length()) << "\n";
   } else {

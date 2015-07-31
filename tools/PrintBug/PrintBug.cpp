@@ -1,4 +1,5 @@
 #include <fstream>
+#include <stack>
 #include "SlimmerTools.h"
 
 // Map an instruction ID to its instruction infomation
@@ -10,19 +11,26 @@ map<int32_t, uint32_t> InsCnt;
 map<int32_t, set<int32_t> > UneededGraph;
 set<int32_t> Printed;
 
-void DFSOnUneededGraph(int32_t id, set<int32_t>& bug) {
+void BFSOnUneededGraph(int32_t id, set<int32_t>& bug) {
   if (Printed.count(id)) return;
-  bug.insert(id); Printed.insert(id);
-  for (auto i: UneededGraph[id])
-    DFSOnUneededGraph(i, bug);
+  stack<int32_t> q;
+  q.push(id);
+  while (!q.empty()) {
+    id = q.top(); q.pop();
+    bug.insert(id); Printed.insert(id);
+    for (auto i: UneededGraph[id]) {
+      if (Printed.count(i) == 0)
+        q.push(i);
+    }
+  }
 }
 
 map<string, vector<string> > CodeCahe;
-string getCode(string path, size_t loc) {
+string GetCode(string path, size_t loc) {
   if (CodeCahe.count(path) == 0) {
     ifstream in(path);
     string str; vector<string> c;
-    while (!in.eof()) {
+    while (in.good() && !in.eof()) {
       getline(in, str);
       c.push_back(str);
     }
@@ -34,7 +42,7 @@ string getCode(string path, size_t loc) {
 
 void PrintBug(char *unneeded_file_name) {
   TraceIter iter(unneeded_file_name);
-  uint32_t cnt; int32_t a, b;
+  uint32_t cnt, edge_cnt = 0, vertex_cnt = 0; int32_t a, b;
   while (iter.Next(&a, sizeof(a))) {
     InsCnt[a] += 1;
 
@@ -43,14 +51,23 @@ void PrintBug(char *unneeded_file_name) {
       iter.Next(&b, sizeof(b));
       UneededGraph[a].insert(b);
       UneededGraph[b].insert(a);
+      edge_cnt++;
     }
+    ++vertex_cnt;
+    if (vertex_cnt % 10000 == 0) {
+      printf("Read %u %u\n", vertex_cnt, edge_cnt);
+      fflush(stdout);
+    }
+    if (vertex_cnt >= 4610000) break;
   }
+  printf("Read done %u %u\n", vertex_cnt, edge_cnt);
+  fflush(stdout);
 
   int bug_cnt = 1;
   for (auto i: InsCnt) {
     if (!Printed.count(i.first)) {
       set<int32_t> bug;
-      DFSOnUneededGraph(i.first, bug);
+      BFSOnUneededGraph(i.first, bug);
       
       printf("===============\nBug %d\n===============\n", bug_cnt++);
       printf("\n------IR------\n");
@@ -76,7 +93,7 @@ void PrintBug(char *unneeded_file_name) {
             printf("\n");
           }
 
-          string code = getCode(i.first, l);
+          string code = GetCode(i.first, l);
           if (code != "") {
             if (code_cnt[make_pair(i.first, l)] > 0)
               printf("(%4d)\t%d:\t%s\n", code_cnt[make_pair(i.first, l)], l, code.c_str());
@@ -86,6 +103,7 @@ void PrintBug(char *unneeded_file_name) {
           last_line = l;
         }
       }
+      fflush(stdout);
     }
   }
 }
