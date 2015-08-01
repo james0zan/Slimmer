@@ -445,3 +445,4 @@ __attribute__((always_inline)) void recordMemmove(uint32_t id, void *dest,
 
   event_buffer.EndAppend();
 }
+

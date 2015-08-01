@@ -24,7 +24,7 @@
 #include <netdb.h>
 using namespace std;
 
-// #define DEBUG_SLIMMER_PIN
+#define DEBUG_SLIMMER_PIN
 #ifdef DEBUG_SLIMMER_PIN
 #define DEBUG(...) fprintf(stderr, __VA_ARGS__)
 #else
@@ -50,9 +50,12 @@ inline bool notTrace(string name) {
           name == "recordAddLock" ||
           name == "recordBasicBlockEvent" ||
           name == "recordMemoryEvent" ||
+          name == "recordStoreEvent" ||
           name == "recordCallEvent" ||
           name == "recordReturnEvent" ||
           name == "recordArgumentEvent" ||
+          name == "recordMemset" ||
+          name == "recordMemmove" ||
           name == "memcpy" ||
           name == "memmove‘" ||
           name == "memset" ||
