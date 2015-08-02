@@ -8,8 +8,8 @@
 #include <errno.h>
 #include <string.h>
 #include <assert.h>
+#include <map>
 #include <set>
-
 #include <errno.h>
 #include <fcntl.h>
 #include <libunwind-ptrace.h>
@@ -21,7 +21,11 @@
 
 using namespace std;
 
+#define GET_FUN_NAME
+
+#define USER_DATA_BASE 0x7f0000000000
 void *PTRACE_OPT = (void *)(PTRACE_O_TRACESYSGOOD | PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK | PTRACE_O_TRACECLONE);
+static unw_addr_space_t as;
 
 int run_child(int argc, char **argv) {
   char *args[argc+1];
@@ -33,159 +37,95 @@ int run_child(int argc, char **argv) {
   return execvp(args[0], args);
 }
 
-static const int nerrors_max = 100;
+set<long> CallIP, LastFun;
+#ifdef GET_FUN_NAME
+map<long, string> Start2FunName;
+#endif
 
-int nerrors;
-int verbose;
-int print_names = 1;
-
-enum
-  {
-    INSTRUCTION,
-    SYSCALL,
-    TRIGGER
-  }
-trace_mode = SYSCALL;
-static unw_addr_space_t as;
-static struct UPT_info *ui;
-#define panic(args...)            \
-  do { fprintf (stderr, args); ++nerrors; } while (0)
-
-void do_backtrace(pid_t target_pid) {
-  unw_word_t ip, sp, start_ip = 0, off;
-  int n = 0, ret;
+void do_backtrace(pid_t target_pid, struct UPT_info * ui) {
+  unw_word_t ip;
   unw_proc_info_t pi;
   unw_cursor_t c;
-  char buf[512];
-  size_t len;
+  long last_fun = 0;
 
-  ui = (UPT_info *)_UPT_create (target_pid);
-  ret = unw_init_remote(&c, as, ui);
-  if (ret < 0)
-    panic ("unw_init_remote() failed: ret=%d\n", ret);
-  do {
-    if ((ret = unw_get_reg(&c, UNW_REG_IP, &ip)) < 0 || (ret = unw_get_reg(&c, UNW_REG_SP, &sp)) < 0)
-      panic("unw_get_reg/unw_get_proc_name() failed: ret=%d\n", ret);
-
-    if (n == 0) start_ip = ip;
+  if (unw_init_remote(&c, as, ui) < 0) return;
+  for (int _ = 0; _ < 64; ++_) {
+    if (unw_get_reg(&c, UNW_REG_IP, &ip) < 0) break;
+    if (ip < USER_DATA_BASE) {
+      CallIP.insert(ip - 5);
+      LastFun.insert(last_fun);
+      return;
+    }
+    if (unw_get_proc_info (&c, &pi) < 0) break;
+    last_fun = pi.start_ip;
+    
+#ifdef GET_FUN_NAME
+    char buf[512]; unw_word_t off;
     buf[0] = '\0';
-    
-    if (print_names) unw_get_proc_name (&c, buf, sizeof (buf), &off);
+    unw_get_proc_name(&c, buf, sizeof(buf), &off);
+    Start2FunName[last_fun] = buf;
+#endif
 
-    if (true /*verbose*/) {
-      if (off) {
-        len = strlen (buf);
-        if (len >= sizeof (buf) - 32)
-        len = sizeof (buf) - 32;
-        sprintf (buf + len, "+0x%lx", (unsigned long) off);
-      }
-      printf ("%016lx %-32s (sp=%016lx)\n", (long) ip, buf, (long) sp);
-    }
-
-    if ((ret = unw_get_proc_info (&c, &pi)) < 0)
-      panic ("unw_get_proc_info(ip=0x%lx) failed: ret=%d\n", (long) ip, ret);
-    else if (true /*verbose*/)
-      printf ("\tproc=%016lx-%016lx\n\thandler=%lx lsda=%lx",
-      (long) pi.start_ip, (long) pi.end_ip,
-      (long) pi.handler, (long) pi.lsda);
-
-#if UNW_TARGET_IA64
-    {
-      unw_word_t bsp;
-      if ((ret = unw_get_reg (&c, UNW_IA64_BSP, &bsp)) < 0)
-        panic ("unw_get_reg() failed: ret=%d\n", ret);
-      else if (verbose)
-        printf (" bsp=%lx", bsp);
-    }
-#endif 
-
-    if (verbose) printf ("\n");
-
-    ret = unw_step (&c);
-    if (ret < 0) {
-      unw_get_reg (&c, UNW_REG_IP, &ip);
-      panic ("FAILURE: unw_step() returned %d for ip=%lx (start ip=%lx)\n",
-          ret, (long) ip, (long) start_ip);
-    }
-
-    if (++n > 64) {
-      /* guard against bad unwind info in old libraries... */
-      panic ("too deeply nested---assuming bogus unwind (start ip=%lx)\n",
-        (long) start_ip);
-      break;
-    }
-    
-    if (nerrors > nerrors_max) {
-      panic ("Too many errors (%d)!\n", nerrors);
-      break;
-    }
-  } while (ret > 0);
-
-  if (ret < 0)
-    panic ("unwind failed with ret=%d\n", ret);
-
-  if (verbose)
-    printf ("================\n\n");
+    if (unw_step(&c) < 0) break;
+  }
 }
 
-void  trace_syscall(int pid) {
+void  trace_syscall(int pid, struct UPT_info * ui) {
   int syscall_num = ptrace(PTRACE_PEEKUSER, pid, sizeof(long)*ORIG_RAX);
-  if (syscall_num == 0 || syscall_num == 1) {
-      // || syscall_num == 9
-      // || syscall_num == 17 || syscall_num == 18
-      // || syscall_num == 20
-      // || (syscall_num >= 42 && syscall_num <= 50)
-      // || syscall_num == 54 || syscall_num == 62
-      // || syscall_num == 68 || syscall_num == 69
-      // || (syscall_num >= 82 && syscall_num <=95)
-      // || syscall_num == 202 || syscall_num == 295 || syscall_num == 296) {
-    fprintf(stderr, "%d %d\n", pid, syscall_num);
-    do_backtrace(pid);
+  if (syscall_num == 0 || syscall_num == 1
+      || syscall_num == 9
+      || syscall_num == 17 || syscall_num == 18
+      || syscall_num == 20
+      || (syscall_num >= 42 && syscall_num <= 50)
+      || syscall_num == 54 || syscall_num == 62
+      || syscall_num == 68 || syscall_num == 69
+      || (syscall_num >= 82 && syscall_num <=95)
+      || syscall_num == 202 || syscall_num == 295 || syscall_num == 296) {
+    do_backtrace(pid, ui);
   }
 }
 
 void do_trace(pid_t child) {
-  int pid, status, wait_errno, event;
-  set<int> threads;
+  int pid, status;
+  map<int, struct UPT_info *> threads;
 
   waitpid(child, &status, 0);
   ptrace(PTRACE_SETOPTIONS, child, NULL, PTRACE_OPT);
   ptrace(PTRACE_SYSCALL, child, 0, 0);
-  threads.insert(child);
+  UPT_info *ui = (UPT_info *)_UPT_create (child);
+  threads[child] = ui;
 
-  while (1) {
-    if (threads.size() == 0) return;
-
+  while (!threads.empty()) {
     pid = waitpid(-1, &status, __WALL);
-    wait_errno = errno;
-    if (pid < 0) {
-      if (wait_errno == EINTR) continue;
-      if (threads.size() == 0 && wait_errno == ECHILD) return;
-      assert("Unknow waitpid error!" && false);
-    }
+    if (pid < 0) continue;
 
-    /* Is this the very first time we see this tracee stopped? */
     if (threads.count(pid) == 0) {
-      if (!WIFSTOPPED(status)) {
-        printf("Exit of unknown pid %u seen\n", pid);
-        continue;
-      }
+      if (!WIFSTOPPED(status)) continue;
       ptrace(PTRACE_SETOPTIONS, pid, NULL, PTRACE_OPT);
-      threads.insert(pid);
+
+      UPT_info *ui = (UPT_info *)_UPT_create(pid);
+      threads[pid] = ui;
     }
 
-    if (WIFSIGNALED(status) || WIFEXITED(status)) {
-      threads.erase(pid);
-      continue;
-    }
-    if (!WIFSTOPPED(status)) {
-      fprintf(stderr, "PANIC: pid %u not stopped\n", pid);
+    if (WIFSIGNALED(status) || WIFEXITED(status) || !WIFSTOPPED(status)) {
+      _UPT_destroy(threads[pid]);
       threads.erase(pid);
       continue;
     }
 
-    trace_syscall(pid);
+    trace_syscall(pid, threads[pid]);
     ptrace(PTRACE_SYSCALL, pid, 0, 0);
+  }
+
+  puts("=====Callq IP=====");
+  for (auto i: CallIP) printf("%lx\n", i);
+  puts("=====Called Function=====");
+  for (auto i: LastFun) {
+#ifdef GET_FUN_NAME
+    printf("%lx %s\n", i, Start2FunName[i].c_str());
+#else
+    printf("%lx\n", i);
+#endif
   }
 }
 
