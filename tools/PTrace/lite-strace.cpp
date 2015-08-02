@@ -19,6 +19,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "SlimmerTools.h"
 using namespace std;
 
 #define GET_FUN_NAME
@@ -117,16 +118,20 @@ void do_trace(pid_t child) {
     ptrace(PTRACE_SYSCALL, pid, 0, 0);
   }
 
-  puts("=====Callq IP=====");
-  for (auto i: CallIP) printf("%lx\n", i);
-  puts("=====Called Function=====");
-  for (auto i: LastFun) {
-#ifdef GET_FUN_NAME
-    printf("%lx %s\n", i, Start2FunName[i].c_str());
-#else
-    printf("%lx\n", i);
-#endif
-  }
+  CompressBuffer dump("/scratch1/zhangmx/SlimmerStrace");
+  for (auto i: CallIP) dump.Append(&i, sizeof(i));
+  for (auto i: LastFun) dump.Append(&i, sizeof(i));
+
+//   puts("=====Callq IP=====");
+//   for (auto i: CallIP) printf("%lx\n", i);
+//   puts("=====Called Function=====");
+//   for (auto i: LastFun) {
+// #ifdef GET_FUN_NAME
+//     printf("%lx %s\n", i, Start2FunName[i].c_str());
+// #else
+//     printf("%lx\n", i);
+// #endif
+//   }
 }
 
 int main(int argc, char **argv) {

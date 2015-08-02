@@ -9,6 +9,7 @@
 
 LEVEL := ../..
 TOOLNAME = lite-strace
+USEDLIBS = SlimmerUtil.a
 
 include $(LEVEL)/Makefile.common
-LIBS += -lunwind-ptrace -lunwind -lunwind-x86_64
+LIBS += -lunwind-ptrace -lunwind -lunwind-x86_64 -lboost_system -lboost_iostreams -llz4

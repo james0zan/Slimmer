@@ -1,94 +1,1069 @@
 #include <fstream>
 #include <stack>
+
 #include "SlimmerTools.h"
+#include "SegmentTree.hpp"
+
+//===----------------------------------------------------------------------===//
+//                        Common
+//===----------------------------------------------------------------------===//
 
 // Map an instruction ID to its instruction infomation
 vector<InstInfo> Ins;
 // Map a basic block ID to all the instructions that belong to it
 vector<vector<uint32_t> > BB2Ins;
+// A set of function calls that impact the outside enviroment.
+set<uint64_t> ImpactfulFunCall;
 
-map<int32_t, uint32_t> InsCnt;
+// Recording the basic block stack.
+// The last executed instruction is
+// the CurIndex-th instruction of basic block BBID.
+struct StackInfo {
+  uint32_t BBID;
+  uint32_t CurIndex;
+  StackInfo() {}
+  StackInfo(uint32_t bb_id, int64_t cur_index)
+      : BBID(bb_id), CurIndex(cur_index) {}
+};
+vector<SmallestBlock> BlockTrace;
+
+// A segment tree that maps a memory address to its group
+SegmentTree<int> *Addr2Group;
+// For each group, we use a segment tree to record all the memory addresses that
+// belong to it
+map<uint32_t, SegmentTree<int> *> Group2Addr;
+int MaxGroupID;
+map<pair<uint64_t, uint32_t>, int> Ins2Group;
+map<int, set<pair<uint64_t, uint32_t> > > Group2Ins;
+
+map<DynamicInst, vector<DynamicInst> > MemDependencies;
+map<uint32_t, set<uint32_t> > PostDominator;
+
+map<int32_t, uint32_t> UneededInsCnt;
 map<int32_t, set<int32_t> > UneededGraph;
-set<int32_t> Printed;
 
-void BFSOnUneededGraph(int32_t id, set<int32_t>& bug) {
-  if (Printed.count(id)) return;
-  stack<int32_t> q;
-  q.push(id);
-  while (!q.empty()) {
-    id = q.top(); q.pop();
-    bug.insert(id); Printed.insert(id);
-    for (auto i: UneededGraph[id]) {
-      if (Printed.count(i) == 0)
-        q.push(i);
+//===----------------------------------------------------------------------===//
+//                        Segment Tree
+//===----------------------------------------------------------------------===//
+
+/// Collect all the groups within a specific range of memory.
+///
+/// \param l - the starting address of the memory.
+/// \param r - the lasting address + 1 (not included) of memory.
+/// \param addr_group - the segment tree that maps a memory address to its
+/// group.
+/// \return - a list of segments that are belonged to different groups.
+///
+vector<Segment<int> > Collect(uint64_t l, uint64_t r,
+                              SegmentTree<int> *addr_group) {
+  auto segments = addr_group->Collect(l, r);
+  segments[0].left = l;
+  segments[segments.size() - 1].right = r;
+
+  return segments;
+}
+
+/// Merging a list of segment trees into one segment tree.
+///
+/// \param trees - a list of segment trees that should be merged.
+/// \param new_group - the merged group ID.
+/// \param addr_group - the segment tree that maps a memory address to its
+/// group.
+/// \return - the merged segment tree.
+///
+SegmentTree<int> *Merging(vector<SegmentTree<int> *> trees, int new_group,
+                          SegmentTree<int> *addr_group) {
+  vector<SegmentTree<int> *> l_childs, r_childs;
+  for (auto i : trees) {
+    if (i->type == COVERED_SEGMENT) {
+      addr_group->Set(i->left, i->right, new_group);
+      return new SegmentTree<int>(COVERED_SEGMENT, 1, i->left, i->right);
+    } else if (i->type == PARTIAL_SEGMENT) {
+      l_childs.push_back(i->l_child);
+      r_childs.push_back(i->r_child);
+    }
+  }
+  if (l_childs.size() == 0) {
+    return new SegmentTree<int>(EMPTY_SEGMENT, 0, trees[0]->left,
+                                trees[0]->right);
+  }
+  return new SegmentTree<int>(PARTIAL_SEGMENT, -1, trees[0]->left,
+                              trees[0]->right,
+                              Merging(l_childs, new_group, addr_group),
+                              Merging(r_childs, new_group, addr_group));
+}
+
+/// Merging a list of groups into one group.
+///
+/// \param groups - a list of groups that should be merged.
+/// \return - the merged group ID.
+///
+int Merging(set<int> groups) {
+  int new_group;
+  if (groups.size() == 0) {
+    new_group = (++MaxGroupID);
+    Group2Addr[new_group] = SegmentTree<int>::NewTree();
+    return new_group;
+  }
+
+  new_group = *groups.begin();
+  if (groups.size() == 1) {
+    return new_group;
+  }
+
+  // Merging two or more groups
+  vector<SegmentTree<int> *> trees;
+  for (auto i : groups) {
+    if (Group2Addr.count(i))
+      trees.push_back(Group2Addr[i]);
+  }
+  Group2Addr[new_group] = Merging(trees, new_group, Addr2Group);
+
+  for (auto i : groups) {
+    if (i == new_group)
+      continue;
+
+    auto tree = Group2Addr[i];
+    if (tree)
+      delete tree;
+    Group2Addr.erase(i);
+
+    for (auto ins : Group2Ins[i])
+      Ins2Group[ins] = new_group;
+    Group2Ins[new_group].insert(Group2Ins[i].begin(), Group2Ins[i].end());
+    Group2Ins.erase(i);
+  }
+
+  return new_group;
+}
+
+//===----------------------------------------------------------------------===//
+//                        ExtractImpactfulFunCall
+//===----------------------------------------------------------------------===//
+
+/// Extract the function calls that impact the outside enviroment.
+///
+/// \param pin_trace_file_name - path to trace file generated by PIN tool.
+/// \param impactful_fun_call - recording the function calls that impact the
+/// outside enviroment.
+///
+void ExtractImpactfulFunCall(char *pin_trace_file_name,
+                             set<uint64_t> &impactful_fun_call) {
+  impactful_fun_call.clear();
+
+  boost::iostreams::mapped_file_source trace(pin_trace_file_name);
+  auto data = trace.data();
+  char event_label;
+  uint64_t *tid_ptr, *fun_ptr;
+
+  map<uint64_t, stack<pair<uint64_t, uint32_t> > > fun_stack;
+  map<pair<uint64_t, uint64_t>, uint32_t> FunCount;
+
+  bool ended = false;
+  char *buffer = (char *)malloc(COMPRESS_BLOCK_SIZE);
+
+  for (size_t _ = 0; !ended && _ < trace.size();) {
+    uint64_t length = (*(uint64_t *)(&data[_]));
+    _ += sizeof(uint64_t);
+
+    uint64_t decoded = LZ4_decompress_safe((const char *)&data[_], buffer,
+                                           length, COMPRESS_BLOCK_SIZE);
+    for (uint64_t cur = 0; !ended && cur < decoded;) {
+      event_label = buffer[cur];
+      switch (event_label) {
+      case EndEventLabel:
+        ++cur;
+        ended = true;
+        break;
+      case CallEventLabel:
+        tid_ptr = (uint64_t *)(&buffer[cur + 1]);
+        fun_ptr = (uint64_t *)(&buffer[cur + 65]);
+        cur += 130;
+        // printf("CallEvent %lu %p\n", *tid_ptr, (void*)*fun_ptr);
+        fun_stack[*tid_ptr]
+            .push(I(*fun_ptr, FunCount[I(*tid_ptr, *fun_ptr)]++));
+        break;
+      case ReturnEventLabel:
+        tid_ptr = (uint64_t *)(&buffer[cur + 1]);
+        fun_ptr = (uint64_t *)(&buffer[cur + 65]);
+        cur += 130;
+        // printf("ReturnEvent %lu %p\n", *tid_ptr, (void*)*fun_ptr);
+        while (!fun_stack[*tid_ptr].empty() &&
+               fun_stack[*tid_ptr].top().first != (*fun_ptr))
+          fun_stack[*tid_ptr].pop();
+        if (!fun_stack[*tid_ptr].empty())
+          fun_stack[*tid_ptr].pop();
+        break;
+      case SyscallEventLabel:
+        tid_ptr = (uint64_t *)(&buffer[cur + 1]);
+        // printf("SyscallEvent %lu\n", *tid_ptr);
+        cur += 66;
+
+        if (fun_stack[*tid_ptr].size() == 0)
+          break;
+        uint64_t fun = fun_stack[*tid_ptr].top().first;
+        // printf("The %d-th execution of function %p of thread %lu is
+        // impactful\n",
+        //   cnt, (void*)fun, *tid_ptr);
+        impactful_fun_call.insert(fun);
+        break;
+      }
+    }
+    _ += length + sizeof(uint64_t);
+  }
+}
+
+//===----------------------------------------------------------------------===//
+//                        MergeTrace
+//===----------------------------------------------------------------------===//
+
+/// This function takes the trace generated by LLVM and PIN
+/// and generated a list of SmallestBlocks that contain
+/// all the information needed for analyzing.
+///
+/// \param inst_file - path to Inst file generated by SlimmerTrace pass.
+/// \param trace_file_name - path to trace file generated by the instrumented
+/// application.
+/// \param output_file_name - path to output file.
+/// \param impactful_fun_call - recoded the function calls that impact the
+/// outside enviroment.
+///
+void MergeTrace(char *trace_file_name, set<uint64_t> &impactful_fun_call,
+                vector<SmallestBlock> &block_trace) {
+  block_trace.clear();
+
+  char event_label;
+  const uint64_t *tid_ptr, *length_ptr, *addr_ptr, *addr2_ptr;
+  const uint32_t *id_ptr;
+
+  // FunCount[<Thread ID tid, Function Address fun>]
+  //    = how many times that thread tid has executed function fun.
+  map<pair<uint64_t, uint64_t>, uint32_t> FunCount;
+
+  map<uint64_t, vector<StackInfo> > call_stack;
+  map<uint64_t, set<uint64_t> > args;
+  map<uint64_t, pair<uint8_t, uint32_t> > is_first;
+
+  map<uint64_t, stack<int32_t> > this_bb_id, last_bb_id;
+  TraceIter iter(trace_file_name);
+  while (iter.NextEvent(event_label, tid_ptr, id_ptr, addr_ptr, length_ptr,
+                        addr2_ptr)) {
+    if (event_label == ArgumentEventLabel) {
+      args[*tid_ptr].insert(*addr_ptr);
+    }
+
+    if (event_label != BasicBlockEventLabel &&
+        event_label != MemoryEventLabel && event_label != ReturnEventLabel &&
+        event_label != MemsetEventLabel && event_label != MemmoveEventLabel)
+      continue;
+
+    if (event_label == BasicBlockEventLabel) {
+      if (call_stack[*tid_ptr].empty()) {
+        // This is the first basic block of a thread.
+        is_first[*tid_ptr] = make_pair((uint8_t)2, (uint32_t)0);
+        this_bb_id[*tid_ptr].push(*id_ptr);
+        last_bb_id[*tid_ptr].push(-1);
+      } else {
+        StackInfo info = call_stack[*tid_ptr].back();
+        if (info.CurIndex >= BB2Ins[info.BBID].size()) {
+          // There is already a basic block executed by this function.
+          call_stack[*tid_ptr].pop_back();
+          is_first[*tid_ptr] = make_pair((uint8_t)0, (uint32_t)0);
+
+          last_bb_id[*tid_ptr].top() = this_bb_id[*tid_ptr].top();
+          this_bb_id[*tid_ptr].top() = (*id_ptr);
+        } else {
+          // This is the starting basic block of a called function.
+          assert(Ins[BB2Ins[info.BBID][info.CurIndex - 1]].Type ==
+                 InstInfo::CallInst);
+          is_first[*tid_ptr] =
+              make_pair((uint8_t)1, BB2Ins[info.BBID][info.CurIndex - 1]);
+          this_bb_id[*tid_ptr].push(*id_ptr);
+          last_bb_id[*tid_ptr].push(-1);
+        }
+      }
+      call_stack[*tid_ptr].push_back(StackInfo(*id_ptr, 0));
+    } else if (event_label == MemoryEventLabel) {
+      StackInfo &info = call_stack[*tid_ptr].back();
+      uint32_t ins_id = BB2Ins[info.BBID][info.CurIndex++];
+      assert((*id_ptr) == ins_id);
+
+      SmallestBlock b(SmallestBlock::MemoryAccessBlock, *tid_ptr, info.BBID,
+                      info.CurIndex - 1, info.CurIndex, is_first[*tid_ptr],
+                      last_bb_id[*tid_ptr].top());
+      b.Addr.push_back(*addr_ptr);
+      b.Addr.push_back(*addr_ptr + *length_ptr);
+      is_first[*tid_ptr] = make_pair((uint8_t)0, (uint32_t)0);
+      // b.Print(Ins, BB2Ins);
+      block_trace.push_back(b);
+    } else if (event_label == ReturnEventLabel) {
+      StackInfo &info = call_stack[*tid_ptr].back();
+      uint32_t ins_id = BB2Ins[info.BBID][info.CurIndex++];
+      assert((*id_ptr) == ins_id);
+
+      SmallestBlock b(SmallestBlock::ExternalCallBlock, *tid_ptr, info.BBID,
+                      info.CurIndex - 1, info.CurIndex, is_first[*tid_ptr],
+                      last_bb_id[*tid_ptr].top());
+      b.Addr.push_back(*addr_ptr);
+
+      for (auto i : args[*tid_ptr])
+        b.Addr.push_back(i);
+      args[*tid_ptr].clear();
+
+      is_first[*tid_ptr] = make_pair((uint8_t)0, (uint32_t)0);
+
+      if (impactful_fun_call.count(*addr_ptr)) {
+        b.Type = SmallestBlock::ImpactfulCallBlock;
+      }
+      FunCount[I(*tid_ptr, *addr_ptr)]++;
+      // b.Print(Ins, BB2Ins);
+      block_trace.push_back(b);
+    } else if (event_label == MemsetEventLabel) {
+      StackInfo &info = call_stack[*tid_ptr].back();
+      uint32_t ins_id = BB2Ins[info.BBID][info.CurIndex++];
+      assert((*id_ptr) == ins_id);
+
+      SmallestBlock b(SmallestBlock::MemsetBlock, *tid_ptr, info.BBID,
+                      info.CurIndex - 1, info.CurIndex, is_first[*tid_ptr],
+                      last_bb_id[*tid_ptr].top());
+      b.Addr.push_back(*addr_ptr);
+      b.Addr.push_back(*addr_ptr + *length_ptr);
+      is_first[*tid_ptr] = make_pair((uint8_t)0, (uint32_t)0);
+      // b.Print(Ins, BB2Ins);
+      block_trace.push_back(b);
+    } else if (event_label == MemmoveEventLabel) {
+      StackInfo &info = call_stack[*tid_ptr].back();
+      uint32_t ins_id = BB2Ins[info.BBID][info.CurIndex++];
+      assert((*id_ptr) == ins_id);
+
+      SmallestBlock b(SmallestBlock::MemmoveBlock, *tid_ptr, info.BBID,
+                      info.CurIndex - 1, info.CurIndex, is_first[*tid_ptr],
+                      last_bb_id[*tid_ptr].top());
+      b.Addr.push_back(*addr_ptr);
+      b.Addr.push_back(*addr_ptr + *length_ptr);
+      b.Addr.push_back(*addr2_ptr);
+      b.Addr.push_back(*addr2_ptr + *length_ptr);
+      is_first[*tid_ptr] = make_pair((uint8_t)0, (uint32_t)0);
+      // b.Print(Ins, BB2Ins);
+      block_trace.push_back(b);
+    }
+
+    while (!call_stack[*tid_ptr].empty()) {
+      StackInfo &info = call_stack[*tid_ptr].back();
+      uint32_t start_index = info.CurIndex, end_index;
+
+      // Get a continuous part of a basic block
+      // that will always be executed continuously.
+      for (end_index = start_index; end_index < BB2Ins[info.BBID].size();
+           ++end_index) {
+        uint32_t ins_id = BB2Ins[info.BBID][end_index];
+        if (Ins[ins_id].Type == InstInfo::CallInst ||
+            Ins[ins_id].Type == InstInfo::ExternalCallInst ||
+            Ins[ins_id].Type == InstInfo::LoadInst ||
+            Ins[ins_id].Type == InstInfo::StoreInst ||
+            Ins[ins_id].Type == InstInfo::AtomicInst) {
+          break;
+        }
+      }
+      if (end_index < BB2Ins[info.BBID].size() &&
+          Ins[BB2Ins[info.BBID][end_index]].Type == InstInfo::CallInst &&
+          Ins[BB2Ins[info.BBID][end_index]].Fun.substr(0, 5) != "llvm.")
+        ++end_index;
+      info.CurIndex = end_index;
+
+      bool last_bb = false;
+      if (info.CurIndex == BB2Ins[info.BBID].size()) {
+        uint32_t last_ins_id = BB2Ins[info.BBID].back();
+        if (Ins[last_ins_id].Type == InstInfo::ReturnInst) {
+          // It is the last SmallestBlock of a function.
+          last_bb = true;
+        }
+      }
+
+      SmallestBlock b;
+      if (end_index > start_index) {
+        SmallestBlock b(SmallestBlock::NormalBlock, *tid_ptr, info.BBID,
+                        start_index, end_index, is_first[*tid_ptr],
+                        last_bb_id[*tid_ptr].top());
+        if (last_bb) {
+          call_stack[*tid_ptr].pop_back();
+          this_bb_id[*tid_ptr].pop();
+          last_bb_id[*tid_ptr].pop();
+
+          if (call_stack[*tid_ptr].empty()) {
+            b.IsLast = 2; // The last SmallestBlock of a thread.
+          } else {
+            b.IsLast = 1;
+            StackInfo last_info = call_stack[*tid_ptr].back();
+            assert(last_info.CurIndex < BB2Ins[last_info.BBID].size());
+            assert(Ins[BB2Ins[last_info.BBID][last_info.CurIndex - 1]].Type ==
+                   InstInfo::CallInst);
+            b.Caller = BB2Ins[last_info.BBID][last_info.CurIndex - 1];
+          }
+        }
+        is_first[*tid_ptr] = make_pair((uint8_t)0, (uint32_t)0);
+        // b.Print(Ins, BB2Ins);
+        block_trace.push_back(b);
+      }
+      if (!last_bb)
+        break;
+    }
+  }
+
+  for (auto &i : call_stack) {
+    auto tid = i.first;
+    while (!i.second.empty()) {
+      StackInfo &info = call_stack[tid].back();
+      SmallestBlock b(SmallestBlock::NormalBlock, tid, info.BBID, info.CurIndex,
+                      info.CurIndex, make_pair((uint8_t)0, (uint32_t)0),
+                      last_bb_id[*tid_ptr].top());
+      call_stack[tid].pop_back();
+      this_bb_id[tid].pop();
+      last_bb_id[tid].pop();
+
+      if (call_stack[tid].empty()) {
+        b.IsLast = 2; // The last SmallestBlock of a thread.
+      } else {
+        b.IsLast = 1;
+        StackInfo last_info = call_stack[tid].back();
+        assert(last_info.CurIndex < BB2Ins[last_info.BBID].size());
+        assert(Ins[BB2Ins[last_info.BBID][last_info.CurIndex - 1]].Type ==
+               InstInfo::CallInst);
+        b.Caller = BB2Ins[last_info.BBID][last_info.CurIndex - 1];
+      }
+      // b.Print(Ins, BB2Ins);
+      block_trace.push_back(b);
     }
   }
 }
+
+//===----------------------------------------------------------------------===//
+//                        GroupMemory
+//===----------------------------------------------------------------------===//
+
+/// Merging all the addresses used in an instruction into one group.
+///
+/// \param shoud_merge - a set of groups that should be merged.
+/// \param ins - a pair of {Thread ID, Instruction ID}.
+/// \param b - the current SmallestBlock object that contains ins.
+/// \param labeled_args - a map that maps the thread ID to arguments that have a
+/// group label attached.
+/// \return - the group ID of merged group.
+///
+int MergeInst(set<int> &shoud_merge, pair<uint64_t, uint32_t> ins,
+              SmallestBlock &b, map<uint64_t, set<uint32_t> > &labeled_args) {
+
+  auto ins_id = ins.second;
+
+  // Merging the result variable
+  if (Ins2Group.count(ins)) {
+    shoud_merge.insert(Ins2Group[ins]);
+  }
+  // Merging all the dependencies
+  for (auto dep : Ins[ins_id].SSADependencies) {
+    if ((dep.first == InstInfo::Inst && Ins[dep.second].IsPointer) ||
+        dep.first == InstInfo::PointerArg) {
+      auto dependent_ins = I(b.TID, dep.second);
+      if (dep.first == InstInfo::PointerArg)
+        dependent_ins.second += Ins.size();
+
+      if (Ins2Group.count(dependent_ins)) {
+        shoud_merge.insert(Ins2Group[dependent_ins]);
+      }
+    }
+  }
+
+  int new_group = Merging(shoud_merge);
+
+  // Clear group information of the result variable
+  if (Ins2Group.count(ins)) {
+    Group2Ins[Ins2Group[ins]].erase(ins);
+    Ins2Group.erase(ins);
+  }
+  // Label the dependencies to new groups
+  for (auto dep : Ins[ins_id].SSADependencies) {
+    if ((dep.first == InstInfo::Inst && Ins[dep.second].IsPointer) ||
+        dep.first == InstInfo::PointerArg) {
+      auto dependent_ins = I(b.TID, dep.second);
+      if (dep.first == InstInfo::PointerArg) {
+        dependent_ins.second += Ins.size();
+        labeled_args[dependent_ins.first].insert(dependent_ins.second);
+      }
+      Ins2Group[dependent_ins] = new_group;
+      Group2Ins[new_group].insert(dependent_ins);
+    }
+  }
+
+  // If it is the first Smallest of a function
+  if (b.IsFirst == 1 || b.IsFirst == 2) {
+    auto labeled_arg = labeled_args[b.TID];
+    labeled_args[b.TID].clear();
+
+    for (auto i : labeled_arg) {
+      auto dependent_arg = I(b.TID, i);
+      if (Ins2Group.count(dependent_arg)) {
+        uint32_t arg_group = Ins2Group[dependent_arg];
+        Group2Ins[Ins2Group[dependent_arg]].erase(dependent_arg);
+        Ins2Group.erase(dependent_arg);
+
+        // Map the argument with the corresponding value
+        if (b.IsFirst == 1) {
+          auto used_arg = Ins[b.Caller].SSADependencies[i - Ins.size()];
+          if ((used_arg.first == InstInfo::Inst &&
+               Ins[used_arg.second].IsPointer) ||
+              used_arg.first == InstInfo::PointerArg) {
+            auto dependent_ins = I(b.TID, used_arg.second);
+            if (used_arg.first == InstInfo::PointerArg) {
+              dependent_ins.second += Ins.size();
+              labeled_args[dependent_ins.first].insert(dependent_ins.second);
+            }
+
+            // Merging the argument's group withe the variable's group
+            if (Ins2Group.count(dependent_ins)) {
+              set<int> merging;
+              merging.insert(arg_group);
+              merging.insert(Ins2Group[dependent_ins]);
+              arg_group = Merging(merging);
+            }
+
+            Ins2Group[dependent_ins] = arg_group;
+            Group2Ins[arg_group].insert(dependent_ins);
+          }
+        }
+      }
+    }
+  }
+  return new_group;
+}
+
+/// Group the memory address into groups.
+/// Two addresses will be group into one group
+/// if one can be calculated from the other.
+///
+/// \param merged_trace_file_name - the merged trace outputed by the merge-trace
+/// tool.
+/// \param output_file_name - the path to output file.
+///
+void GroupMemory(vector<SmallestBlock> &block_trace) {
+  map<uint64_t, set<uint32_t> > labeled_args;
+
+  set<int> shoud_merge;
+  for (int i = block_trace.size() - 1; i >= 0; --i) {
+    SmallestBlock b = block_trace[i];
+
+    if (b.Type == SmallestBlock::MemoryAccessBlock ||
+        b.Type == SmallestBlock::MemsetBlock ||
+        b.Type == SmallestBlock::MemmoveBlock) {
+      if (b.Addr[0] >= b.Addr[1])
+        continue; // Inefficacious write
+
+      shoud_merge.clear();
+      auto ins = I(b.TID, BB2Ins[b.BBID][b.Start]);
+
+      // All the addresses of [Addr[0], Addr[1]) should belong to the same group
+      vector<pair<uint64_t, uint64_t> > ranges;
+      for (auto i : Collect(b.Addr[0], b.Addr[1], Addr2Group)) {
+        if (i.type == EMPTY_SEGMENT) {
+          ranges.push_back(make_pair(i.left, i.right));
+        } else {
+          shoud_merge.insert(i.value);
+        }
+      }
+      if (b.Type == SmallestBlock::MemmoveBlock) {
+        for (auto i : Collect(b.Addr[2], b.Addr[3], Addr2Group)) {
+          if (i.type == EMPTY_SEGMENT) {
+            ranges.push_back(make_pair(i.left, i.right));
+          } else {
+            shoud_merge.insert(i.value);
+          }
+        }
+      }
+
+      auto new_group = MergeInst(shoud_merge, ins, b, labeled_args);
+
+      for (auto i : ranges) {
+        Group2Addr[new_group]->Set(i.first, i.second, 1);
+        Addr2Group->Set(i.first, i.second, new_group);
+      }
+    } else if (b.Type == SmallestBlock::NormalBlock) {
+      for (int _ = b.End - 1; _ >= (int)b.Start; --_) {
+        auto ins = I(b.TID, BB2Ins[b.BBID][_]);
+        if (!Ins[ins.second].IsPointer ||
+            Ins[ins.second].Type == InstInfo::CallInst)
+          continue;
+
+        shoud_merge.clear();
+        MergeInst(shoud_merge, ins, b, labeled_args);
+      }
+    }
+  }
+}
+
+//===----------------------------------------------------------------------===//
+//                        ExtractMemoryDependency
+//===----------------------------------------------------------------------===//
+
+/// Extracting the memory dependencies.
+///
+/// \param merged_trace_file_name - the merged trace outputed by the merge-trace
+/// tool.
+/// \param output_file_name - the path to output file.
+///
+void ExtractMemoryDependency(vector<SmallestBlock> &block_trace,
+                             map<DynamicInst, vector<DynamicInst> > &mem_dep) {
+  map<DynamicInst, set<DynamicInst> > _mem_dep;
+
+  SegmentTree<DynamicInst> *last_store = SegmentTree<DynamicInst>::NewTree();
+  map<pair<uint64_t, uint32_t>, uint32_t> inst_count;
+
+  for (auto &b : block_trace) {
+    if (b.Type == SmallestBlock::MemoryAccessBlock) {
+      uint32_t ins_id = BB2Ins[b.BBID][b.Start];
+      DynamicInst dyn_inst =
+          DynamicInst(b.TID, ins_id, inst_count[I(b.TID, ins_id)]++);
+
+      if (b.Addr[0] >= b.Addr[1])
+        continue; // Inefficacious write
+
+      if (Ins[ins_id].Type == InstInfo::StoreInst) {
+        // Recording a store
+        last_store->Set(b.Addr[0], b.Addr[1], dyn_inst);
+      } else {
+        // Obtaining all the last writes
+        for (auto j : last_store->Collect(b.Addr[0], b.Addr[1])) {
+          if (j.type == COVERED_SEGMENT) {
+            _mem_dep[dyn_inst].insert(j.value);
+          }
+        }
+
+        if (Ins[ins_id].Type == InstInfo::AtomicInst) {
+          // Recording a store from atomic operation
+          last_store->Set(b.Addr[0], b.Addr[1], dyn_inst);
+        }
+      }
+    } else if (b.Type == SmallestBlock::MemsetBlock) {
+      uint32_t ins_id = BB2Ins[b.BBID][b.Start];
+      DynamicInst dyn_inst =
+          DynamicInst(b.TID, ins_id, inst_count[I(b.TID, ins_id)]++);
+
+      if (b.Addr[0] >= b.Addr[1])
+        continue; // Inefficacious write
+
+      // Recording a store
+      last_store->Set(b.Addr[0], b.Addr[1], dyn_inst);
+    } else if (b.Type == SmallestBlock::MemmoveBlock) {
+      uint32_t ins_id = BB2Ins[b.BBID][b.Start];
+      DynamicInst dyn_inst =
+          DynamicInst(b.TID, ins_id, inst_count[I(b.TID, ins_id)]++);
+
+      if (b.Addr[0] >= b.Addr[1])
+        continue; // Inefficacious write
+
+      // Obtaining all the last writes
+      for (auto j : last_store->Collect(b.Addr[2], b.Addr[3])) {
+        if (j.type == COVERED_SEGMENT) {
+          _mem_dep[dyn_inst].insert(j.value);
+        }
+      }
+
+      // Recording a store
+      last_store->Set(b.Addr[0], b.Addr[1], dyn_inst);
+    } else if (b.Type == SmallestBlock::ExternalCallBlock ||
+               b.Type == SmallestBlock::ImpactfulCallBlock) {
+      uint32_t ins_id = BB2Ins[b.BBID][b.Start];
+      DynamicInst dyn_inst =
+          DynamicInst(b.TID, ins_id, inst_count[I(b.TID, ins_id)]++);
+
+      // All the memory addresses of a group are assumed to be accessed,
+      // if one of them is passed as an argument.
+      for (size_t i = 1; i < b.Addr.size(); ++i) {
+        int group_id;
+        if (!Addr2Group->Get(b.Addr[i], group_id))
+          continue;
+        for (auto i :
+             Group2Addr[group_id]->Collect(0, SegmentTree<int>::MAX_RANGE)) {
+          if (i.type == COVERED_SEGMENT) {
+            for (auto j : last_store->Collect(i.left, i.right)) {
+              if (j.type == COVERED_SEGMENT) {
+                _mem_dep[dyn_inst].insert(j.value);
+              }
+            }
+            // TODO: Do not depended on an external call, even if it writes the
+            // memory
+            last_store->Set(i.left, i.right, dyn_inst);
+          }
+        }
+      }
+    }
+  }
+
+  for (auto &i : _mem_dep) {
+    DynamicInst tmp_a = i.first;
+    tmp_a.Cnt -= (inst_count[I(i.first.TID, i.first.ID)] - 1);
+    for (auto &j : i.second) {
+      DynamicInst tmp_b = j;
+      tmp_b.Cnt -= (inst_count[I(j.TID, j.ID)] - 1);
+      mem_dep[tmp_a].push_back(tmp_b);
+    }
+  }
+  delete last_store;
+}
+
+//===----------------------------------------------------------------------===//
+//                        PreparePostDominator
+//===----------------------------------------------------------------------===//
+
+/// A simple DFS function for figuring out which basic block can be reached from
+/// a basic block.
+void DFSOnBBGraph(uint32_t bb_id, set<uint32_t> &mark,
+                  map<uint32_t, vector<uint32_t> > &successor) {
+  mark.insert(bb_id);
+  for (auto i : successor[bb_id]) {
+    if (mark.count(i) == 0)
+      DFSOnBBGraph(i, mark, successor);
+  }
+}
+
+/// Set a := set a intersect set b.
+void SetIntersection(set<uint32_t> &a, set<uint32_t> &b) {
+  set<uint32_t> c;
+  for (auto i : a) {
+    if (b.count(i))
+      c.insert(i);
+  }
+  a = c;
+}
+
+/// Prepare the post dominator infomation from the calling graph of basic
+/// blocks.
+///
+/// \param bbgraph_file_name - path to the calling graph of basic blocks.
+/// \param post_dominator - for recording post dominator infomation.
+///
+void PreparePostDominator(string bbgraph_file_name,
+                          map<uint32_t, set<uint32_t> > &post_dominator) {
+  post_dominator.clear();
+
+  FILE *f = fopen(bbgraph_file_name.c_str(), "r");
+  map<uint32_t, vector<uint32_t> > successor;
+  int a, b;
+  while (fscanf(f, "%d%d", &a, &b) != EOF) {
+    successor[a].push_back(b);
+  }
+
+  for (auto i : successor) {
+    DFSOnBBGraph(i.first, post_dominator[i.first], successor);
+  }
+
+  // Keep doing intersection if the post dominator infomation is changed.
+  bool changed = true;
+  while (changed) {
+    changed = false;
+
+    set<uint32_t> res;
+    for (auto i : successor) {
+      if (i.second.size() > 0)
+        res = post_dominator[i.first];
+      for (auto j : i.second) {
+        SetIntersection(res, post_dominator[j]);
+      }
+      // if (i.second.size() == 1) res.insert(i.second[0]); // TODO
+
+      if (res.size() != post_dominator[i.first].size()) {
+        post_dominator[i.first] = res;
+        changed = true;
+      }
+    }
+  }
+}
+
+//===----------------------------------------------------------------------===//
+//                        ExtractUneededOperation
+//===----------------------------------------------------------------------===//
+
+/// Proccessing the dependencies of one instruction .
+///
+/// \param is_needed - this instruction is needed or not?
+/// \param dyn_ins - the dynamic instruction.
+/// \param last_bb_id - ID of the last executed basic block.
+/// \param needed - for recording all the needed but not yet proccessed dynamic
+/// instructions
+/// \param mem_depended - the memory dependencies extracted by
+/// extract-memory-dependency tool.
+///
+void
+OneInstruction(bool is_needed, DynamicInst dyn_ins, int32_t last_bb_id,
+               set<pair<uint64_t, uint32_t> > &needed,
+               set<DynamicInst> &mem_depended,
+               // CompressBuffer& uneeded_graph,
+               map<DynamicInst, set<DynamicInst> > &unneeded_mem_dep,
+               map<pair<uint64_t, uint32_t>, set<DynamicInst> > &unneeded_dep,
+               map<uint64_t, stack<set<DynamicInst> > > &bb_unused) {
+  if (!is_needed) {
+    // printf("!!!The last %d-th execution of\n  instruction %d, %s\n  from "
+    //        "thread %lu is uneeded.\n",
+    //        dyn_ins.Cnt, dyn_ins.ID, Ins[dyn_ins.ID].Code.c_str(),
+    // dyn_ins.TID);
+    // return;
+    bb_unused[dyn_ins.TID].top().insert(dyn_ins);
+
+    UneededInsCnt[dyn_ins.ID]++;
+    for (auto &i : unneeded_dep[I(dyn_ins.TID, dyn_ins.ID)]) {
+      UneededGraph[dyn_ins.ID].insert(i.ID);
+      UneededGraph[i.ID].insert(dyn_ins.ID);
+    }
+    for (auto &i : unneeded_mem_dep[dyn_ins]) {
+      UneededGraph[dyn_ins.ID].insert(i.ID);
+      UneededGraph[i.ID].insert(dyn_ins.ID);
+    }
+  }
+
+  needed.erase(I(dyn_ins.TID, dyn_ins.ID));
+  mem_depended.erase(dyn_ins);
+  unneeded_dep.erase(I(dyn_ins.TID, dyn_ins.ID));
+  unneeded_mem_dep.erase(dyn_ins);
+
+  // printf("The last %d-th execution of\n  instruction %d, %s\n  from thread
+  // %lu is depended on:\n",
+  //   dyn_ins.Cnt, dyn_ins.ID, Ins[dyn_ins.ID].Code.c_str(), dyn_ins.TID);
+
+  // SSA dependencies
+  for (auto dep : Ins[dyn_ins.ID].SSADependencies) {
+    if (dep.first == InstInfo::Inst) {
+      // printf("  * the last execution of\n\tinstruction %d, %s\n\tfrom thread
+      // %lu\n",
+      //   dep.second, Ins[dep.second].Code.c_str(), dyn_ins.TID);
+      if (is_needed) {
+        needed.insert(I(dyn_ins.TID, dep.second));
+      } else {
+        unneeded_dep[I(dyn_ins.TID, dep.second)].insert(dyn_ins);
+      }
+    } else if (dep.first == InstInfo::Arg ||
+               dep.first == InstInfo::PointerArg) {
+      // TODO
+    }
+  }
+
+  // Memory dependencies
+  for (auto dep : MemDependencies[dyn_ins]) {
+    if (is_needed) {
+      mem_depended.insert(dep);
+    } else {
+      unneeded_mem_dep[dep].insert(dyn_ins);
+    }
+    // printf("  * the last %d-th execution of\n\tinstruction %d, %s\n\tfrom
+    // thread %lu\n",
+    //   dep.Cnt, dep.ID, Ins[dep.ID].Code.c_str(), dep.TID);
+  }
+
+  // Phi dependencies
+  for (auto phi_dep : Ins[dyn_ins.ID].PhiDependencies) {
+    if ((int32_t)get<0>(phi_dep) == last_bb_id) {
+      if (get<1>(phi_dep) == InstInfo::Inst) {
+        // printf("  * the last execution of\n\tinstruction %d, %s\n\tfrom
+        // thread %lu\n",
+        //   get<2>(phi_dep), Ins[get<2>(phi_dep)].Code.c_str(), dyn_ins.TID);
+        if (is_needed) {
+          needed.insert(I(dyn_ins.TID, get<2>(phi_dep)));
+        } else {
+          unneeded_dep[I(dyn_ins.TID, get<2>(phi_dep))].insert(dyn_ins);
+        }
+      } else if (get<1>(phi_dep) == InstInfo::Arg ||
+                 get<1>(phi_dep) == InstInfo::PointerArg) {
+        // TODO
+      }
+      break;
+    }
+  }
+}
+
+/// Return true if it is a return void instruction.
+///
+/// \param code - the LLVM IR of the code.
+/// \return - return if it is a return void instruction.
+///
+bool isReturnVoid(string code) {
+  size_t i = 0;
+  while (i < code.size() && isspace(code[i]))
+    ++i;
+  return code.substr(i, 8) == "ret void";
+}
+
+/// Extract the unneeded opertions in instruction-level.
+///
+/// \param merged_trace_file_name - the merged trace outputed by the merge-trace
+/// tool.
+/// \param output_file_name - the path to output file.
+///
+void ExtractUneededOperation(vector<SmallestBlock> &block_trace) {
+  set<pair<uint64_t, uint32_t> > needed;
+  set<DynamicInst> mem_depended;
+  map<pair<uint64_t, uint32_t>, int32_t> inst_count;
+  map<uint64_t, stack<bool> > fun_used;
+  map<uint64_t, stack<pair<uint32_t, bool> > > bb_used;
+  map<uint64_t, stack<set<DynamicInst> > > bb_unused;
+
+  map<DynamicInst, set<DynamicInst> > unneeded_mem_dep;
+  map<pair<uint64_t, uint32_t>, set<DynamicInst> > unneeded_dep;
+
+  for (int i = block_trace.size() - 1; i >= 0; --i) {
+    SmallestBlock b = block_trace[i];
+    // b.Print(Ins, BB2Ins);
+
+    if (b.IsLast > 0) {
+      fun_used[b.TID].push(false);
+      bb_used[b.TID].push(make_pair(b.BBID, false));
+      bb_unused[b.TID].push(set<DynamicInst>());
+    }
+    bool this_bb_used = false;
+
+    if (b.Type == SmallestBlock::ImpactfulCallBlock) {
+      DynamicInst dyn_ins(b.TID, BB2Ins[b.BBID][b.Start],
+                          -inst_count[I(b.TID, BB2Ins[b.BBID][b.Start])]);
+      OneInstruction(true, dyn_ins, b.LastBBID, needed, mem_depended,
+                     unneeded_mem_dep, unneeded_dep, bb_unused);
+      inst_count[I(dyn_ins.TID, dyn_ins.ID)]++;
+
+      fun_used[b.TID].top() = true;
+      this_bb_used = true;
+    } else if (b.Type == SmallestBlock::MemoryAccessBlock ||
+               b.Type == SmallestBlock::ExternalCallBlock ||
+               b.Type == SmallestBlock::MemsetBlock ||
+               b.Type == SmallestBlock::MemmoveBlock) {
+      DynamicInst dyn_ins(b.TID, BB2Ins[b.BBID][b.Start],
+                          -inst_count[I(b.TID, BB2Ins[b.BBID][b.Start])]);
+      bool is_needed = ((needed.count(I(dyn_ins.TID, dyn_ins.ID)) > 0) ||
+                        (mem_depended.count(dyn_ins) > 0));
+      OneInstruction(is_needed, dyn_ins, b.LastBBID, needed, mem_depended,
+                     unneeded_mem_dep, unneeded_dep, bb_unused);
+      inst_count[I(dyn_ins.TID, dyn_ins.ID)]++;
+
+      fun_used[b.TID].top() |= is_needed;
+      this_bb_used |= is_needed;
+    } else if (b.Type == SmallestBlock::NormalBlock) {
+      for (int _ = b.End - 1; _ >= (int)b.Start; --_) {
+        DynamicInst dyn_ins(b.TID, BB2Ins[b.BBID][_],
+                            -inst_count[I(b.TID, BB2Ins[b.BBID][_])]);
+        bool is_needed = (needed.count(I(dyn_ins.TID, dyn_ins.ID)) > 0);
+
+        if (Ins[dyn_ins.ID].Type == InstInfo::TerminatorInst) {
+          if (PostDominator[b.BBID].count(bb_used[b.TID].top().first))
+            continue;
+
+          is_needed |= bb_used[b.TID].top().second;
+
+          if (!is_needed) {
+            UneededInsCnt[dyn_ins.ID]++;
+            for (auto &i : bb_unused[b.TID].top()) {
+              UneededGraph[dyn_ins.ID].insert(i.ID);
+              UneededGraph[i.ID].insert(dyn_ins.ID);
+            }
+          }
+        } else if (Ins[dyn_ins.ID].Type == InstInfo::ReturnInst) {
+          if (isReturnVoid(Ins[dyn_ins.ID].Code))
+            continue;
+
+          assert(b.IsLast == 1 || b.IsLast == 2);
+          if (b.IsLast == 2) {
+            is_needed = true; // The return value of the last function
+          } else if (b.IsLast == 1) {
+            is_needed |= (needed.count(I(dyn_ins.TID, b.Caller)) > 0);
+          }
+        }
+
+        OneInstruction(is_needed, dyn_ins, b.LastBBID, needed, mem_depended,
+                       unneeded_mem_dep, unneeded_dep, bb_unused);
+        inst_count[I(dyn_ins.TID, dyn_ins.ID)]++;
+        fun_used[b.TID].top() |= is_needed;
+        this_bb_used |= is_needed;
+      }
+    }
+    if (bb_used[b.TID].top().first != b.BBID) {
+      bb_used[b.TID].top() = make_pair(b.BBID, this_bb_used);
+    } else {
+      bb_used[b.TID].top().second |= this_bb_used;
+    }
+
+    if (b.IsFirst > 0) {
+      if (b.IsFirst == 1 && fun_used[b.TID].top()) {
+        needed.insert(I(b.TID, b.Caller));
+      }
+      fun_used[b.TID].pop();
+      bb_used[b.TID].pop();
+      bb_unused[b.TID].pop();
+    }
+  }
+}
+
+//===----------------------------------------------------------------------===//
+//                        PrintBug
+//===----------------------------------------------------------------------===//
 
 map<string, vector<string> > CodeCahe;
 string GetCode(string path, size_t loc) {
   if (CodeCahe.count(path) == 0) {
     ifstream in(path);
-    string str; vector<string> c;
+    string str;
+    vector<string> c;
     while (in.good() && !in.eof()) {
       getline(in, str);
       c.push_back(str);
     }
     CodeCahe[path] = c;
   }
-  if (loc <= 0 || CodeCahe[path].size() < loc) return "";
-  else return CodeCahe[path][loc - 1];
+  if (loc <= 0 || CodeCahe[path].size() < loc)
+    return "";
+  else
+    return CodeCahe[path][loc - 1];
 }
 
-void PrintBug(char *unneeded_file_name) {
-  TraceIter iter(unneeded_file_name);
-  uint32_t cnt, edge_cnt = 0, vertex_cnt = 0; int32_t a, b;
-  while (iter.Next(&a, sizeof(a))) {
-    InsCnt[a] += 1;
-
-    iter.Next(&cnt, sizeof(cnt));
-    while (cnt--) {
-      iter.Next(&b, sizeof(b));
-      UneededGraph[a].insert(b);
-      UneededGraph[b].insert(a);
-      edge_cnt++;
+void BFSOnUneededGraph(int32_t id, set<int32_t> &bug, set<int32_t> &printed) {
+  if (printed.count(id))
+    return;
+  stack<int32_t> q;
+  q.push(id);
+  while (!q.empty()) {
+    id = q.top();
+    q.pop();
+    bug.insert(id);
+    printed.insert(id);
+    for (auto i : UneededGraph[id]) {
+      if (printed.count(i) == 0)
+        q.push(i);
     }
-    ++vertex_cnt;
-    if (vertex_cnt % 10000 == 0) {
-      printf("Read %u %u\n", vertex_cnt, edge_cnt);
-      fflush(stdout);
-    }
-    if (vertex_cnt >= 4610000) break;
   }
-  printf("Read done %u %u\n", vertex_cnt, edge_cnt);
-  fflush(stdout);
+}
 
+void PrintBug() {
+  set<int32_t> printed;
   int bug_cnt = 1;
-  for (auto i: InsCnt) {
-    if (!Printed.count(i.first)) {
+  for (auto i : UneededInsCnt) {
+    if (!printed.count(i.first)) {
       set<int32_t> bug;
-      BFSOnUneededGraph(i.first, bug);
-      
+      BFSOnUneededGraph(i.first, bug, printed);
+
       printf("===============\nBug %d\n===============\n", bug_cnt++);
       printf("\n------IR------\n");
-      for (auto j: bug) {
-        printf("(%4d)\t%d:\t%s\n", InsCnt[j], j, Ins[j].Code.c_str());
+      for (auto j : bug) {
+        printf("(%4d)\t%d:\t%s\n", UneededInsCnt[j], j, Ins[j].Code.c_str());
       }
       printf("\n------Related Code------\n");
       map<string, set<int> > used_code;
       map<pair<string, int>, int> code_cnt;
-      for (auto j: bug) {
-        if (Ins[j].File == "[UNKNOWN]") continue;
+      for (auto j : bug) {
+        if (Ins[j].File == "[UNKNOWN]")
+          continue;
 
         for (int i = -3; i <= 3; ++i)
           used_code[Ins[j].File].insert(Ins[j].LoC + i);
         code_cnt[make_pair(Ins[j].File, Ins[j].LoC)] += 1;
       }
-      for (auto& i: used_code) {
+      for (auto &i : used_code) {
         printf("\n%s\n", i.first.c_str());
         int last_line = -1;
-        for (auto l: i.second) {
-          if (l < 0) continue;
+        for (auto l : i.second) {
+          if (l < 0)
+            continue;
           if (last_line != l - 1) {
             printf("\n");
           }
@@ -96,7 +1071,8 @@ void PrintBug(char *unneeded_file_name) {
           string code = GetCode(i.first, l);
           if (code != "") {
             if (code_cnt[make_pair(i.first, l)] > 0)
-              printf("(%4d)\t%d:\t%s\n", code_cnt[make_pair(i.first, l)], l, code.c_str());
+              printf("(%4d)\t%d:\t%s\n", code_cnt[make_pair(i.first, l)], l,
+                     code.c_str());
             else
               printf("      \t%d:\t%s\n", l, code.c_str());
           }
@@ -108,12 +1084,33 @@ void PrintBug(char *unneeded_file_name) {
   }
 }
 
+//===----------------------------------------------------------------------===//
+//                        Main
+//===----------------------------------------------------------------------===//
+
 int main(int argc, char *argv[]) {
-  // if (argc != 5 && argc != 6) {
-  //   printf("Usage: extract-uneeded-operation inst-file bbgraph-file "
-  //          "mem-dependencies merged-trace-file [output-file]\n");
-  //   exit(1);
+  if (argc != 4) {
+    printf("Usage: print-bug slimmer_dir slimmer_trace pin_trace\n");
+    exit(1);
+  }
+
+  string slimmer_dir = argv[1];
+  LoadInstInfo(slimmer_dir + "/Inst", Ins, BB2Ins);
+  ExtractImpactfulFunCall(argv[3], ImpactfulFunCall);
+  MergeTrace(argv[2], ImpactfulFunCall, BlockTrace);
+
+  // Addr2Group = SegmentTree<int>::NewTree();
+  // Group2Addr.clear();
+  // MaxGroupID = 0;
+  // GroupMemory(BlockTrace);
+  // ExtractMemoryDependency(BlockTrace, MemDependencies);
+  // delete Addr2Group;
+  // for (auto &i : Group2Addr) {
+  //   delete i.second;
   // }
-  LoadInstInfo(argv[1], Ins, BB2Ins);
-  PrintBug(argv[2]);
+  // Group2Addr.clear();
+
+  // PreparePostDominator(slimmer_dir + "/BBGraph", PostDominator);
+  // ExtractUneededOperation(BlockTrace);
+  // PrintBug();
 }

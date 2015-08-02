@@ -18,7 +18,7 @@ using namespace llvm;
 LogLevel _log_level = DEBUG;
 static cl::opt<std::string>
 TraceFilename("trace-file", cl::desc("Name of the trace file"),
-              cl::init("SlimmerTrace"));
+              cl::init("/scratch1/zhangmx/SlimmerTrace"));
 static cl::opt<std::string> InfoDir(
     "slimmer-info-dir",
     cl::desc("The directory that reserves all the generated code infomation"),
