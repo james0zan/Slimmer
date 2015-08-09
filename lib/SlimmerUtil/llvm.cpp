@@ -38,6 +38,9 @@ Value *LLVMCastTo(Value *V, Type *Ty, Twine Name, Instruction *InsertPt) {
   if (Constant *C = dyn_cast<Constant>(V)) {
     if (C->getType()->isPtrOrPtrVectorTy()) {
       return ConstantExpr::getPointerCast(C, Ty);
+    } else if (C->getType()->isFloatTy()) {
+      Constant * C1 = ConstantExpr::getFPCast(C, Type::getDoubleTy(V->getType()->getContext()));
+      return ConstantExpr::getZExtOrBitCast(C1, Ty);
     } else {
       return ConstantExpr::getZExtOrBitCast(C, Ty);
     }
@@ -47,8 +50,13 @@ Value *LLVMCastTo(Value *V, Type *Ty, Twine Name, Instruction *InsertPt) {
   CastInst *ins;
   if (V->getType()->isPtrOrPtrVectorTy())
     ins = CastInst::CreatePointerCast(V, Ty, Name, InsertPt);
-  else
+  else if (V->getType()->isFloatTy()) {
+    CastInst *ins2 = CastInst::CreateFPCast(V, Type::getDoubleTy(V->getType()->getContext()), Name);
+    ins = CastInst::CreateZExtOrBitCast(ins2, Ty, Name, InsertPt);
+    ins2->insertBefore(ins);
+  } else {
     ins = CastInst::CreateZExtOrBitCast(V, Ty, Name, InsertPt);
+  }
     
   return ins;
 }

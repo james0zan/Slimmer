@@ -409,7 +409,7 @@ void GroupMemory(char *merged_trace_file_name, char *output_file_name) {
   //   printf("[%lx,%lx): %d %d\n", i.left, i.right, i.type, i.value);
   // }
 
-  ExtractMemoryDependency(merged_trace_file_name, output_file_name);
+  // ExtractMemoryDependency(merged_trace_file_name, output_file_name);
 }
 
 int main(int argc, char *argv[]) {

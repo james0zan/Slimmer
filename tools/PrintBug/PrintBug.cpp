@@ -39,9 +39,7 @@ map<int, set<pair<uint64_t, uint32_t> > > Group2Ins;
 map<DynamicInst, vector<DynamicInst> > MemDependencies;
 map<uint32_t, set<uint32_t> > PostDominator;
 
-map<int32_t, uint32_t> UneededInsCnt;
-map<int32_t, set<int32_t> > UneededGraph;
-
+map<uint64_t, set<uint32_t> > Addr2Unneded;
 //===----------------------------------------------------------------------===//
 //                        Segment Tree
 //===----------------------------------------------------------------------===//
@@ -312,9 +310,15 @@ void MergeTrace(char *trace_file_name, set<uint64_t> &impactful_fun_call,
 
       is_first[*tid_ptr] = make_pair((uint8_t)0, (uint32_t)0);
 
-      if (impactful_fun_call.count(*addr_ptr)) {
+      if (impactful_fun_call.count(*addr_ptr)
+        || Ins[ins_id].Fun == "close"
+        || Ins[ins_id].Fun == "fflush"
+        || Ins[ins_id].Fun == "signal"
+        || Ins[ins_id].Fun == "fstate"
+        || Ins[ins_id].Fun.substr(0, 8) == "pthread_") {
         b.Type = SmallestBlock::ImpactfulCallBlock;
       }
+
       FunCount[I(*tid_ptr, *addr_ptr)]++;
       // b.Print(Ins, BB2Ins);
       block_trace.push_back(b);
@@ -791,37 +795,12 @@ void PreparePostDominator(string bbgraph_file_name,
 /// \param mem_depended - the memory dependencies extracted by
 /// extract-memory-dependency tool.
 ///
-void
-OneInstruction(bool is_needed, DynamicInst dyn_ins, int32_t last_bb_id,
+void OneInstruction(
+               DynamicInst dyn_ins, int32_t last_bb_id,
                set<pair<uint64_t, uint32_t> > &needed,
-               set<DynamicInst> &mem_depended,
-               // CompressBuffer& uneeded_graph,
-               map<DynamicInst, set<DynamicInst> > &unneeded_mem_dep,
-               map<pair<uint64_t, uint32_t>, set<DynamicInst> > &unneeded_dep,
-               map<uint64_t, stack<set<DynamicInst> > > &bb_unused) {
-  if (!is_needed) {
-    // printf("!!!The last %d-th execution of\n  instruction %d, %s\n  from "
-    //        "thread %lu is uneeded.\n",
-    //        dyn_ins.Cnt, dyn_ins.ID, Ins[dyn_ins.ID].Code.c_str(),
-    // dyn_ins.TID);
-    // return;
-    bb_unused[dyn_ins.TID].top().insert(dyn_ins);
-
-    UneededInsCnt[dyn_ins.ID]++;
-    for (auto &i : unneeded_dep[I(dyn_ins.TID, dyn_ins.ID)]) {
-      UneededGraph[dyn_ins.ID].insert(i.ID);
-      UneededGraph[i.ID].insert(dyn_ins.ID);
-    }
-    for (auto &i : unneeded_mem_dep[dyn_ins]) {
-      UneededGraph[dyn_ins.ID].insert(i.ID);
-      UneededGraph[i.ID].insert(dyn_ins.ID);
-    }
-  }
-
+               set<DynamicInst> &mem_depended) {
   needed.erase(I(dyn_ins.TID, dyn_ins.ID));
   mem_depended.erase(dyn_ins);
-  unneeded_dep.erase(I(dyn_ins.TID, dyn_ins.ID));
-  unneeded_mem_dep.erase(dyn_ins);
 
   // printf("The last %d-th execution of\n  instruction %d, %s\n  from thread
   // %lu is depended on:\n",
@@ -833,27 +812,16 @@ OneInstruction(bool is_needed, DynamicInst dyn_ins, int32_t last_bb_id,
       // printf("  * the last execution of\n\tinstruction %d, %s\n\tfrom thread
       // %lu\n",
       //   dep.second, Ins[dep.second].Code.c_str(), dyn_ins.TID);
-      if (is_needed) {
-        needed.insert(I(dyn_ins.TID, dep.second));
-      } else {
-        unneeded_dep[I(dyn_ins.TID, dep.second)].insert(dyn_ins);
-      }
-    } else if (dep.first == InstInfo::Arg ||
-               dep.first == InstInfo::PointerArg) {
-      // TODO
+      needed.insert(I(dyn_ins.TID, dep.second));
     }
   }
 
   // Memory dependencies
   for (auto dep : MemDependencies[dyn_ins]) {
-    if (is_needed) {
-      mem_depended.insert(dep);
-    } else {
-      unneeded_mem_dep[dep].insert(dyn_ins);
-    }
     // printf("  * the last %d-th execution of\n\tinstruction %d, %s\n\tfrom
     // thread %lu\n",
     //   dep.Cnt, dep.ID, Ins[dep.ID].Code.c_str(), dep.TID);
+    mem_depended.insert(dep);
   }
 
   // Phi dependencies
@@ -863,14 +831,7 @@ OneInstruction(bool is_needed, DynamicInst dyn_ins, int32_t last_bb_id,
         // printf("  * the last execution of\n\tinstruction %d, %s\n\tfrom
         // thread %lu\n",
         //   get<2>(phi_dep), Ins[get<2>(phi_dep)].Code.c_str(), dyn_ins.TID);
-        if (is_needed) {
-          needed.insert(I(dyn_ins.TID, get<2>(phi_dep)));
-        } else {
-          unneeded_dep[I(dyn_ins.TID, get<2>(phi_dep))].insert(dyn_ins);
-        }
-      } else if (get<1>(phi_dep) == InstInfo::Arg ||
-                 get<1>(phi_dep) == InstInfo::PointerArg) {
-        // TODO
+        needed.insert(I(dyn_ins.TID, get<2>(phi_dep)));
       }
       break;
     }
@@ -895,33 +856,61 @@ bool isReturnVoid(string code) {
 /// tool.
 /// \param output_file_name - the path to output file.
 ///
-void ExtractUneededOperation(vector<SmallestBlock> &block_trace) {
+void ExtractUneededOperation(vector<SmallestBlock> &block_trace, set<DynamicInst>& unneeded_di) {
+  map<pair<uint64_t, uint32_t>, int32_t> inst_count;
   set<pair<uint64_t, uint32_t> > needed;
   set<DynamicInst> mem_depended;
-  map<pair<uint64_t, uint32_t>, int32_t> inst_count;
   map<uint64_t, stack<bool> > fun_used;
-  map<uint64_t, stack<pair<uint32_t, bool> > > bb_used;
-  map<uint64_t, stack<set<DynamicInst> > > bb_unused;
+  map<uint64_t, stack<pair<uint32_t, bool> > > next_bb_used;
+  map<uint64_t, stack<tuple<uint32_t, DynamicInst, bool> > > terminator_stack;
 
-  map<DynamicInst, set<DynamicInst> > unneeded_mem_dep;
-  map<pair<uint64_t, uint32_t>, set<DynamicInst> > unneeded_dep;
-
-  for (int i = block_trace.size() - 1; i >= 0; --i) {
+  unneeded_di.clear();
+  for (int64_t i = block_trace.size() - 1; i >= 0; --i) {
+    // if (i % 100000 == 0) {
+    //   fprintf(stderr, "%ld/%lu\n", i, block_trace.size());
+    // }
     SmallestBlock b = block_trace[i];
     // b.Print(Ins, BB2Ins);
 
     if (b.IsLast > 0) {
       fun_used[b.TID].push(false);
-      bb_used[b.TID].push(make_pair(b.BBID, false));
-      bb_unused[b.TID].push(set<DynamicInst>());
+      next_bb_used[b.TID].push(make_pair(b.BBID, false));
+      terminator_stack[b.TID].push(make_tuple(b.BBID, DynamicInst(0, 0, 0), true));
+    } else if (next_bb_used[b.TID].size() > 0 
+      && next_bb_used[b.TID].top().first != b.BBID
+      && next_bb_used[b.TID].top().second) {
+      // If a BB is just finished and it is used, its terminator is also used
+      int next_bb_id = next_bb_used[b.TID].top().first;
+      auto t = terminator_stack[b.TID].top();
+      if (get<2>(t) == false) {
+        DynamicInst dyn_ins = get<1>(t);
+        int cnt_diff = dyn_ins.Cnt + inst_count[I(b.TID, dyn_ins.ID)];  
+          
+        set<pair<uint64_t, uint32_t> > this_needed;
+        OneInstruction(dyn_ins, b.LastBBID, this_needed, mem_depended);
+        unneeded_di.erase(dyn_ins);
+        for (int _ = BB2Ins[next_bb_id].size() - 1; _ >= 0; --_) {
+          DynamicInst dyn_ins2(b.TID, BB2Ins[next_bb_id][_],
+                              cnt_diff - inst_count[I(b.TID, BB2Ins[next_bb_id][_])]);
+          if (
+            this_needed.count(I(dyn_ins2.TID, dyn_ins2.ID)) > 0
+            || mem_depended.count(dyn_ins2)) {
+            
+            OneInstruction(dyn_ins2, b.LastBBID, this_needed, mem_depended);
+            unneeded_di.erase(dyn_ins2);
+          }
+        }
+        needed.insert(this_needed.begin(), this_needed.end());
+      }
+      terminator_stack[b.TID].top() = make_tuple(b.BBID, DynamicInst(0, 0, 0), true);
     }
+
     bool this_bb_used = false;
 
     if (b.Type == SmallestBlock::ImpactfulCallBlock) {
       DynamicInst dyn_ins(b.TID, BB2Ins[b.BBID][b.Start],
                           -inst_count[I(b.TID, BB2Ins[b.BBID][b.Start])]);
-      OneInstruction(true, dyn_ins, b.LastBBID, needed, mem_depended,
-                     unneeded_mem_dep, unneeded_dep, bb_unused);
+      OneInstruction(dyn_ins, b.LastBBID, needed, mem_depended);
       inst_count[I(dyn_ins.TID, dyn_ins.ID)]++;
 
       fun_used[b.TID].top() = true;
@@ -930,12 +919,27 @@ void ExtractUneededOperation(vector<SmallestBlock> &block_trace) {
                b.Type == SmallestBlock::ExternalCallBlock ||
                b.Type == SmallestBlock::MemsetBlock ||
                b.Type == SmallestBlock::MemmoveBlock) {
+      
+      if (b.Type == SmallestBlock::ExternalCallBlock) {
+        if (Ins[BB2Ins[b.BBID][b.Start]].Fun == "free") continue;
+        if (Ins[BB2Ins[b.BBID][b.Start]].Fun == "va_start") continue;
+        if (Ins[BB2Ins[b.BBID][b.Start]].Fun == "va_end") continue;
+      }
+
       DynamicInst dyn_ins(b.TID, BB2Ins[b.BBID][b.Start],
                           -inst_count[I(b.TID, BB2Ins[b.BBID][b.Start])]);
-      bool is_needed = ((needed.count(I(dyn_ins.TID, dyn_ins.ID)) > 0) ||
-                        (mem_depended.count(dyn_ins) > 0));
-      OneInstruction(is_needed, dyn_ins, b.LastBBID, needed, mem_depended,
-                     unneeded_mem_dep, unneeded_dep, bb_unused);
+      bool is_needed = false;
+      if (
+        (needed.count(I(dyn_ins.TID, dyn_ins.ID)) > 0)
+        || (mem_depended.count(dyn_ins) > 0)) {
+        is_needed = true;
+        OneInstruction(dyn_ins, b.LastBBID, needed, mem_depended);
+      } else {
+        if (b.Type == SmallestBlock::MemoryAccessBlock && b.Addr[0] < b.Addr[1]) {
+          Addr2Unneded[b.Addr[0]].insert(dyn_ins.ID);
+        }
+        unneeded_di.insert(dyn_ins);
+      }
       inst_count[I(dyn_ins.TID, dyn_ins.ID)]++;
 
       fun_used[b.TID].top() |= is_needed;
@@ -947,21 +951,15 @@ void ExtractUneededOperation(vector<SmallestBlock> &block_trace) {
         bool is_needed = (needed.count(I(dyn_ins.TID, dyn_ins.ID)) > 0);
 
         if (Ins[dyn_ins.ID].Type == InstInfo::TerminatorInst) {
-          if (PostDominator[b.BBID].count(bb_used[b.TID].top().first))
-            continue;
+          // If the next bb is used and it is not a PostDominator of
+          // the current bb, the terminator is used.
+          if (!PostDominator[b.BBID].count(next_bb_used[b.TID].top().first))
+            is_needed |= next_bb_used[b.TID].top().second;
 
-          is_needed |= bb_used[b.TID].top().second;
-
-          if (!is_needed) {
-            UneededInsCnt[dyn_ins.ID]++;
-            for (auto &i : bb_unused[b.TID].top()) {
-              UneededGraph[dyn_ins.ID].insert(i.ID);
-              UneededGraph[i.ID].insert(dyn_ins.ID);
-            }
-          }
+          terminator_stack[b.TID].top() = make_tuple(b.BBID, dyn_ins, is_needed);
         } else if (Ins[dyn_ins.ID].Type == InstInfo::ReturnInst) {
-          if (isReturnVoid(Ins[dyn_ins.ID].Code))
-            continue;
+          // "ret void" is ignored
+          if (isReturnVoid(Ins[dyn_ins.ID].Code)) continue;
 
           assert(b.IsLast == 1 || b.IsLast == 2);
           if (b.IsLast == 2) {
@@ -971,26 +969,58 @@ void ExtractUneededOperation(vector<SmallestBlock> &block_trace) {
           }
         }
 
-        OneInstruction(is_needed, dyn_ins, b.LastBBID, needed, mem_depended,
-                       unneeded_mem_dep, unneeded_dep, bb_unused);
+        if (is_needed) {
+          OneInstruction(dyn_ins, b.LastBBID, needed, mem_depended);
+        } else {
+          // Only one successor
+          if (Ins[dyn_ins.ID].Type == InstInfo::TerminatorInst && Ins[dyn_ins.ID].Successors.size() <= 1) {
+          } else unneeded_di.insert(dyn_ins);
+        }
         inst_count[I(dyn_ins.TID, dyn_ins.ID)]++;
         fun_used[b.TID].top() |= is_needed;
         this_bb_used |= is_needed;
       }
     }
-    if (bb_used[b.TID].top().first != b.BBID) {
-      bb_used[b.TID].top() = make_pair(b.BBID, this_bb_used);
+
+
+    if (next_bb_used[b.TID].top().first != b.BBID) {
+      next_bb_used[b.TID].top() = make_pair(b.BBID, this_bb_used);
     } else {
-      bb_used[b.TID].top().second |= this_bb_used;
+      next_bb_used[b.TID].top().second |= this_bb_used;
     }
 
     if (b.IsFirst > 0) {
       if (b.IsFirst == 1 && fun_used[b.TID].top()) {
         needed.insert(I(b.TID, b.Caller));
       }
+
+      // If this bb is used, its terminator is used
+      if (next_bb_used[b.TID].top().second ) {
+        auto t = terminator_stack[b.TID].top();
+        if (get<2>(t) == false) {
+          DynamicInst dyn_ins = get<1>(t);
+          int cnt_diff = dyn_ins.Cnt + inst_count[I(b.TID, dyn_ins.ID)];
+
+          set<pair<uint64_t, uint32_t> > this_needed;
+          OneInstruction(dyn_ins, b.LastBBID, this_needed, mem_depended);
+          unneeded_di.erase(dyn_ins);
+          for (int _ = BB2Ins[b.BBID].size() - 1; _ >= 0; --_) {
+            DynamicInst dyn_ins2(b.TID, BB2Ins[b.BBID][_],
+                                cnt_diff - inst_count[I(b.TID, BB2Ins[b.BBID][_])]);
+            if (
+              this_needed.count(I(dyn_ins2.TID, dyn_ins2.ID)) > 0
+              || mem_depended.count(dyn_ins2)) {
+              OneInstruction(dyn_ins2, b.LastBBID, this_needed, mem_depended);
+              unneeded_di.erase(dyn_ins2);
+            }
+          }
+          needed.insert(this_needed.begin(), this_needed.end());
+        }
+      }
+
       fun_used[b.TID].pop();
-      bb_used[b.TID].pop();
-      bb_unused[b.TID].pop();
+      next_bb_used[b.TID].pop();
+      terminator_stack[b.TID].pop();
     }
   }
 }
@@ -1017,9 +1047,10 @@ string GetCode(string path, size_t loc) {
     return CodeCahe[path][loc - 1];
 }
 
-void BFSOnUneededGraph(int32_t id, set<int32_t> &bug, set<int32_t> &printed) {
-  if (printed.count(id))
-    return;
+void BFSOnUneededGraph(map<uint32_t, set<uint32_t> >& graph,
+  int32_t id, set<int32_t> &bug, set<int32_t> &printed) {
+  
+  if (printed.count(id)) return;
   stack<int32_t> q;
   q.push(id);
   while (!q.empty()) {
@@ -1027,25 +1058,57 @@ void BFSOnUneededGraph(int32_t id, set<int32_t> &bug, set<int32_t> &printed) {
     q.pop();
     bug.insert(id);
     printed.insert(id);
-    for (auto i : UneededGraph[id]) {
+    for (auto i : graph[id]) {
       if (printed.count(i) == 0)
         q.push(i);
     }
   }
 }
 
-void PrintBug() {
+void PrintBug(set<DynamicInst>& bug) {
+  map<uint32_t, uint32_t> uneeded_ins_cnt;
+  for (auto i: bug) uneeded_ins_cnt[i.ID]++;
+
+  map<uint32_t, set<uint32_t> > uneeded_graph;
+  for (auto i: bug) {
+    // SSA dependencies
+    for (auto dep : Ins[i.ID].SSADependencies) {
+      if (dep.first == InstInfo::Inst) {
+        DynamicInst dyn_ins(i.TID, dep.second, i.Cnt);
+        if (bug.count(dyn_ins)) {
+          uneeded_graph[i.ID].insert(dep.second);
+          uneeded_graph[dep.second].insert(i.ID);
+        }
+      }
+    }
+    // Memory dependencies
+    for (auto dep : MemDependencies[i]) {
+      if (bug.count(dep)) {
+        uneeded_graph[i.ID].insert(dep.ID);
+        uneeded_graph[dep.ID].insert(i.ID);
+      }
+    }
+  }
+
+  for (auto& i: Addr2Unneded) {
+    uint32_t id = (*i.second.begin());
+    for (auto j : i.second) {
+      uneeded_graph[id].insert(j);
+      uneeded_graph[j].insert(id);
+    }
+  }
+
   set<int32_t> printed;
   int bug_cnt = 1;
-  for (auto i : UneededInsCnt) {
+  for (auto i : uneeded_ins_cnt) {
     if (!printed.count(i.first)) {
       set<int32_t> bug;
-      BFSOnUneededGraph(i.first, bug, printed);
+      BFSOnUneededGraph(uneeded_graph, i.first, bug, printed);
 
       printf("===============\nBug %d\n===============\n", bug_cnt++);
       printf("\n------IR------\n");
       for (auto j : bug) {
-        printf("(%4d)\t%d:\t%s\n", UneededInsCnt[j], j, Ins[j].Code.c_str());
+        printf("(%4d)\t%d:\t%s\n", uneeded_ins_cnt[j], j, Ins[j].Code.c_str());
       }
       printf("\n------Related Code------\n");
       map<string, set<int> > used_code;
@@ -1095,22 +1158,32 @@ int main(int argc, char *argv[]) {
   }
 
   string slimmer_dir = argv[1];
+  fprintf(stderr, "LoadInstInfo\n");
   LoadInstInfo(slimmer_dir + "/Inst", Ins, BB2Ins);
+  fprintf(stderr, "ExtractImpactfulFunCall\n");
   ExtractImpactfulFunCall(argv[3], ImpactfulFunCall);
+  fprintf(stderr, "MergeTrace\n");
   MergeTrace(argv[2], ImpactfulFunCall, BlockTrace);
 
-  // Addr2Group = SegmentTree<int>::NewTree();
-  // Group2Addr.clear();
-  // MaxGroupID = 0;
-  // GroupMemory(BlockTrace);
-  // ExtractMemoryDependency(BlockTrace, MemDependencies);
-  // delete Addr2Group;
-  // for (auto &i : Group2Addr) {
-  //   delete i.second;
-  // }
-  // Group2Addr.clear();
+  Addr2Group = SegmentTree<int>::NewTree();
+  Group2Addr.clear();
+  MaxGroupID = 0;
+  fprintf(stderr, "GroupMemory\n");
+  GroupMemory(BlockTrace);
+  fprintf(stderr, "ExtractMemoryDependency\n");
+  ExtractMemoryDependency(BlockTrace, MemDependencies);
+  delete Addr2Group;
+  for (auto &i : Group2Addr) {
+    delete i.second;
+  }
+  Group2Addr.clear();
 
-  // PreparePostDominator(slimmer_dir + "/BBGraph", PostDominator);
-  // ExtractUneededOperation(BlockTrace);
-  // PrintBug();
+  fprintf(stderr, "PreparePostDominator\n");
+  PreparePostDominator(slimmer_dir + "/BBGraph", PostDominator);
+  fprintf(stderr, "ExtractUneededOperation\n");
+
+  set<DynamicInst> bug;
+  ExtractUneededOperation(BlockTrace, bug);
+  fprintf(stderr, "PrintBug\n");
+  PrintBug(bug);
 }

@@ -1,20 +1,10 @@
 #include <stdio.h>
+#include <string.h>
 
-const char *format = "%d %p %p\n";
-struct X {
-  int a, b;
-};
-
-void Foo(X* tmp) {
-  tmp->b = 2;
-}
 
 int main(void) {
-  X tmp;
-  tmp.a = 1;
-  Foo(&tmp);
-  tmp.b = 2;
-  int c = 1;
-  printf(format, tmp.a, format, &tmp);
+  char a[20];
+  memset(a, 1, 20);
+  memset(a, 1, 20);
+  printf("%d\n", a[0]);
 }
-
