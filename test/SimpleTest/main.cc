@@ -1,10 +1,19 @@
+//===----------------------------------------------------------------------===//
+//  This is a simple version of GCC#57812,
+//  in which the later part of a loop
+//  is unused.
+//===----------------------------------------------------------------------===//
+
 #include <stdio.h>
-#include <string.h>
 
+int main() {
+  bool flag = false, flag2 = true;
+  int x = 0;
 
-int main(void) {
-  char a[20];
-  memset(a, 1, 20);
-  memset(a, 1, 20);
-  printf("%d\n", a[0]);
+  if (flag) {
+    x = 1;
+  } else if (!flag2) {
+     x = 2;
+  }
+  printf("%d\n", x);
 }

@@ -199,7 +199,8 @@ struct InstInfo {
     TerminatorInst,
     PhiNode,
     VarArg,
-    AtomicInst
+    AtomicInst,
+    AllocaInst
   };
   InstType Type;
 
@@ -218,6 +219,7 @@ int GetEvent(bool backward, const char *cur, char &event_label,
 void LoadInstrumentedFun(std::string path, std::set<std::string> &instrumented);
 void LoadInstInfo(std::string path, std::vector<InstInfo> &info,
                   std::vector<std::vector<uint32_t> > &bb2ins);
+bool IsImpactfulFunction(std::string name);
 
 //===----------------------------------------------------------------------===//
 //                           Dynamic Instruction
@@ -239,6 +241,30 @@ struct DynamicInst {
       return ID < rhs.ID;
     return Cnt < rhs.Cnt;
   }
+};
+
+//===----------------------------------------------------------------------===//
+//                           CompressBuffer
+//===----------------------------------------------------------------------===//
+
+/// Stream buffer for appending compressed data
+class CompressBuffer {
+public:
+  CompressBuffer(const char *path);
+
+  ~CompressBuffer();
+
+  /// Prepare a buffer larger than len
+  void Prepare(size_t len);
+
+  /// Append [ptr, ptr+len) to the buffer.
+  void Append(void *ptr, size_t len);
+
+private:
+  char *buffer, *compressed;
+  FILE *stream;
+  size_t offset;
+  size_t size; // Size of the event buffer in bytes
 };
 
 #endif // SLIMMER_UTIL_H

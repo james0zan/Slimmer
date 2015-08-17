@@ -16,9 +16,9 @@
 using namespace llvm;
 
 LogLevel _log_level = DEBUG;
-static cl::opt<std::string>
-TraceFilename("trace-file", cl::desc("Name of the trace file"),
-              cl::init("/scratch1/zhangmx/SlimmerTrace"));
+static cl::opt<std::string> TraceFilename("trace-file",
+                                          cl::desc("Name of the trace file"),
+                                          cl::init("SlimmerTrace"));
 static cl::opt<std::string> InfoDir(
     "slimmer-info-dir",
     cl::desc("The directory that reserves all the generated code infomation"),
@@ -72,6 +72,9 @@ struct SlimmerTrace : public ModulePass {
   void instrumentMemmove(CallInst *call_ptr);
   void instrumentAtomicRMWInst(AtomicRMWInst *atomic_rmw_ptr);
   void instrumentAtomicCmpXchgInst(AtomicCmpXchgInst *atomic_cas_ptr);
+  void instrumentAllocaInst(AllocaInst *alloca_ptr);
+  void instrumentAllocaInst(CallInst *call_ptr);
+  void instrumentAllocaInst2(CallInst *call_ptr);
 
   // Functions for recording events during execution
   Function *recordInit;
@@ -79,6 +82,7 @@ struct SlimmerTrace : public ModulePass {
   Function *recordBasicBlockEvent;
   Function *recordMemoryEvent;
   Function *recordStoreEvent;
+  Function *recordCallocEvent;
   // Function *recordCallEvent;
   Function *recordReturnEvent;
   Function *recordArgumentEvent;
@@ -172,7 +176,7 @@ std::string SlimmerTrace::CommonInfo(Instruction *ins) {
 }
 
 bool SlimmerTrace::doInitialization(Module &module) {
-  LOG(DEBUG, "SlimmerTrace::doInitialization") << "Start";
+  // LOG(DEBUG, "SlimmerTrace::doInitialization") << "Start";
 
   // Reserve the infomation directory and the files
   srand(time(NULL));
@@ -212,10 +216,9 @@ bool SlimmerTrace::doInitialization(Module &module) {
       module.getOrInsertFunction("recordStoreEvent", VoidType, Int32Type,
                                  VoidPtrType, Int64Type, Int64Type, nullptr));
 
-  // // Recording the call to an uninstrumented function
-  // recordCallEvent = cast<Function>(
-  //   module.getOrInsertFunction("recordCallEvent",
-  //     VoidType, Int32Type, VoidPtrType, nullptr));
+  recordCallocEvent = cast<Function>(
+      module.getOrInsertFunction("recordCallocEvent", VoidType, Int32Type,
+                                 VoidPtrType, Int64Type, Int64Type, nullptr));
 
   // Recording the return of an uninstrumented function
   recordReturnEvent = cast<Function>(module.getOrInsertFunction(
@@ -237,7 +240,7 @@ bool SlimmerTrace::doInitialization(Module &module) {
 
   // Create the constructor
   appendCtor(module);
-  LOG(DEBUG, "SlimmerTrace::doInitialization") << "End";
+  // LOG(DEBUG, "SlimmerTrace::doInitialization") << "End";
   return true;
 }
 
@@ -286,12 +289,13 @@ bool notTraced(Instruction *ins) {
 }
 
 bool SlimmerTrace::runOnModule(Module &module) {
-  LOG(DEBUG, "SlimmerTrace::runOnModule") << "Start";
+  // LOG(DEBUG, "SlimmerTrace::runOnModule") << "Start";
 
   dataLayout = &getAnalysis<DataLayout>();
 
   // The basic block (instruction) ID is started from 0
   uint32_t bb_id = 0, ins_id = 0;
+  Function *main_function = NULL;
   std::vector<Instruction *> ins_list;
   for (Module::iterator fun_ptr = module.begin(), fun_end = module.end();
        fun_ptr != fun_end; ++fun_ptr) {
@@ -300,6 +304,9 @@ bool SlimmerTrace::runOnModule(Module &module) {
     std::string fun_name = fun_ptr->stripPointerCasts()->getName().str();
     instrumentedFun.insert(fun_name);
     fInstrumentedFun << fun_name << "\n";
+    if (fun_name == "main") {
+      main_function = fun_ptr;
+    }
     for (Function::iterator bb_ptr = fun_ptr->begin(), bb_end = fun_ptr->end();
          bb_ptr != bb_end; ++bb_ptr) {
       bb2ID[bb_ptr] = bb_id++;
@@ -313,6 +320,28 @@ bool SlimmerTrace::runOnModule(Module &module) {
         ins_list.push_back(ins_ptr);
       }
       instrumentBasicBlock(bb_ptr);
+    }
+  }
+
+  {
+    Instruction *last = main_function->begin()->begin();
+    for (Module::global_iterator gi = module.global_begin(),
+                                 gend = module.global_end();
+         gi != gend; ++gi) {
+      if (value2String(gi).substr(0, 6) == "@llvm.")
+        continue;
+      Value *id = ConstantInt::get(Int32Type, (uint32_t) - 1);
+      Constant *cons = ConstantExpr::getPointerCast(gi, VoidPtrType);
+      uint64_t size =
+          dataLayout->getTypeStoreSize(gi->getType()->getElementType());
+      Value *global_size = ConstantInt::get(Int64Type, size);
+
+      std::vector<Value *> args =
+          make_vector<Value *>(id, cons, global_size, 0);
+      Instruction *call = CallInst::Create(recordMemoryEvent, args);
+
+      call->insertBefore(last);
+      last = call;
     }
   }
 
@@ -395,7 +424,16 @@ bool SlimmerTrace::runOnModule(Module &module) {
       } else {
         std::string fun_name = called_fun->stripPointerCasts()->getName().str();
 
-        if (instrumentedFun.count(fun_name) == 0) {
+        if (fun_name == "fmalloc" || fun_name == "xmalloc" ||
+            fun_name == "malloc" || fun_name == "_Znam" ||
+            fun_name == "_Znwm") {
+          fInst << "\tAllocaInst\n";
+          instrumentAllocaInst(call_ptr);
+        } else if (fun_name == "calloc" || fun_name == "fcalloc" ||
+                   fun_name == "xcalloc") {
+          fInst << "\tAllocaInst\n";
+          instrumentAllocaInst2(call_ptr);
+        } else if (instrumentedFun.count(fun_name) == 0) {
           fInst << "\tExternalCallInst\n\t" << fun_name << "\n";
           instrumentCallInst(call_ptr);
         } else {
@@ -410,18 +448,30 @@ bool SlimmerTrace::runOnModule(Module &module) {
         // TODO
       } else {
         std::string fun_name = called_fun->stripPointerCasts()->getName().str();
-        if (instrumentedFun.count(fun_name) == 0) {
+        if (fun_name == "fmalloc" || fun_name == "xmalloc" ||
+            fun_name == "malloc" || fun_name == "_Znam" ||
+            fun_name == "_Znwm") {
+          fInst << "\tAllocaInst\n";
+          assert(false);
+        } else if (fun_name == "calloc" || fun_name == "fcalloc" ||
+                   fun_name == "xcalloc") {
+          fInst << "\tAllocaInst\n";
+          assert(false);
+        } else if (instrumentedFun.count(fun_name) == 0) {
           fInst << "\tExternalCallInst\n\t" << fun_name << "\n";
           // TODO
         } else {
           fInst << "\tCallInst\n\t" << fun_name << "\n";
         }
       }
+    } else if (AllocaInst *alloca_ptr = dyn_cast<AllocaInst>(ins_ptr)) {
+      fInst << "\tAllocaInst\n";
+      instrumentAllocaInst(alloca_ptr);
     } else { // Normal Instruction
       fInst << "\tNormalInst\n";
     }
   }
-  LOG(DEBUG, "SlimmerTrace::runOnModule") << "End";
+  // LOG(DEBUG, "SlimmerTrace::runOnModule") << "End";
   return true;
 }
 
@@ -489,6 +539,78 @@ void SlimmerTrace::instrumentStoreInst(StoreInst *store_ptr) {
         make_vector<Value *>(store_id, addr, store_size, 0);
     CallInst::Create(recordMemoryEvent, args)->insertAfter(store_ptr);
   }
+}
+
+/// Add a call to the recordMemoryEvent function after a alloca instruction.
+///
+/// \param alloca_ptr - the alloca instruction.
+///
+void SlimmerTrace::instrumentAllocaInst(AllocaInst *alloca_ptr) {
+  // Get the ID of the load instruction.
+  assert(ins2ID.count(alloca_ptr) > 0);
+  Value *alloca_id = ConstantInt::get(Int32Type, ins2ID[alloca_ptr]);
+
+  CastInst *cast_ins = CastInst::CreatePointerCast(alloca_ptr, VoidPtrType,
+                                                   alloca_ptr->getName());
+  cast_ins->insertAfter(alloca_ptr);
+
+  // Get the size of the loaded data.
+  uint64_t size =
+      dataLayout->getTypeStoreSize(alloca_ptr->getType()->getElementType());
+  Value *alloca_size = ConstantInt::get(Int64Type, size);
+
+  std::vector<Value *> args =
+      make_vector<Value *>(alloca_id, cast_ins, alloca_size, 0);
+  CallInst::Create(recordMemoryEvent, args)->insertAfter(cast_ins);
+}
+
+/// Add a call to the recordMemoryEvent function after a malloc function.
+///
+/// \param call_ptr - the caller of malloc function.
+///
+void SlimmerTrace::instrumentAllocaInst(CallInst *call_ptr) {
+  // Get the ID of the load instruction.
+  assert(ins2ID.count(call_ptr) > 0);
+  Value *alloca_id = ConstantInt::get(Int32Type, ins2ID[call_ptr]);
+
+  CastInst *cast_ins =
+      CastInst::CreatePointerCast(call_ptr, VoidPtrType, call_ptr->getName());
+  cast_ins->insertAfter(call_ptr);
+
+  // Get the size of the loaded data.
+  Value *alloca_size =
+      LLVMCastTo(call_ptr->getArgOperand(0), Int64Type,
+                 call_ptr->getArgOperand(0)->getName(), call_ptr);
+
+  std::vector<Value *> args =
+      make_vector<Value *>(alloca_id, cast_ins, alloca_size, 0);
+  CallInst::Create(recordMemoryEvent, args)->insertAfter(cast_ins);
+}
+
+/// Add a call to the recordMemoryEvent function after a calloc function.
+///
+/// \param call_ptr - the caller of calloc function.
+///
+void SlimmerTrace::instrumentAllocaInst2(CallInst *call_ptr) {
+  // Get the ID of the load instruction.
+  assert(ins2ID.count(call_ptr) > 0);
+  Value *alloca_id = ConstantInt::get(Int32Type, ins2ID[call_ptr]);
+
+  CastInst *cast_ins =
+      CastInst::CreatePointerCast(call_ptr, VoidPtrType, call_ptr->getName());
+  cast_ins->insertAfter(call_ptr);
+
+  // Get the size of the loaded data.
+  Value *alloca_size =
+      LLVMCastTo(call_ptr->getArgOperand(0), Int64Type,
+                 call_ptr->getArgOperand(0)->getName(), call_ptr);
+  Value *alloca_size2 =
+      LLVMCastTo(call_ptr->getArgOperand(1), Int64Type,
+                 call_ptr->getArgOperand(1)->getName(), call_ptr);
+
+  std::vector<Value *> args =
+      make_vector<Value *>(alloca_id, cast_ins, alloca_size, alloca_size2, 0);
+  CallInst::Create(recordCallocEvent, args)->insertAfter(cast_ins);
 }
 
 /// Add a call to the recordMemoryEvent function after an AtomicRMWInst.
@@ -559,7 +681,7 @@ void SlimmerTrace::instrumentCallInst(CallInst *call_ptr) {
   std::vector<Value *> args = make_vector<Value *>(call_id, fun_ptr, 0);
   // CallInst::Create(recordCallEvent, args, "", call_ptr);
   auto last_ins = CallInst::Create(recordReturnEvent, args);
-  last_ins->insertAfter(call_ptr);
+  last_ins->insertBefore(call_ptr);
 }
 
 /// Add a call to the recordMemset function before the function call.
@@ -604,4 +726,3 @@ void SlimmerTrace::instrumentMemmove(CallInst *call_ptr) {
   std::vector<Value *> args = make_vector<Value *>(call_id, dest, src, len, 0);
   CallInst::Create(recordMemmove, args)->insertBefore(call_ptr);
 }
-

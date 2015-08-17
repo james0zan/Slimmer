@@ -3,6 +3,67 @@
 #include <fstream>
 using namespace std;
 
+//===----------------------------------------------------------------------===//
+//                           CompressBuffer
+//===----------------------------------------------------------------------===//
+
+CompressBuffer::CompressBuffer(const char *path) {
+  size = COMPRESS_BLOCK_SIZE;
+
+  buffer = (char *)malloc(size);
+  compressed = (char *)malloc(LZ4_compressBound(size));
+  assert(buffer && compressed && "Failed to malloc the CompressBuffer!\n");
+
+  stream = fopen(path, "wb");
+  assert(stream && "Failed to open tracing file!\n");
+  offset = 0;
+}
+
+CompressBuffer::~CompressBuffer() {
+  uint64_t after_compress =
+      LZ4_compress_limitedOutput((const char *)buffer, (char *)compressed,
+                                 offset, LZ4_compressBound(size));
+  fwrite(&after_compress, sizeof(after_compress), 1, stream);
+  size_t cur = 0;
+  while (cur < after_compress) {
+    size_t tmp = fwrite(compressed + cur, 1, after_compress - cur, stream);
+    if (tmp > 0)
+      cur += tmp;
+  }
+  fwrite(&after_compress, sizeof(after_compress), 1, stream);
+  fclose(stream);
+}
+
+/// Prepare a buffer larger than len
+void CompressBuffer::Prepare(size_t len) {
+  if (offset + len > size) {
+    uint64_t after_compress =
+        LZ4_compress_limitedOutput((const char *)buffer, (char *)compressed,
+                                   offset, LZ4_compressBound(size));
+    fwrite(&after_compress, sizeof(after_compress), 1, stream);
+    size_t cur = 0;
+    while (cur < after_compress) {
+      size_t tmp = fwrite(compressed + cur, 1, after_compress - cur, stream);
+      if (tmp > 0)
+        cur += tmp;
+    }
+    fwrite(&after_compress, sizeof(after_compress), 1, stream);
+    offset = 0;
+  }
+}
+
+/// Append [ptr, ptr+len) to the buffer.
+void CompressBuffer::Append(void *ptr, size_t len) {
+  Prepare(len);
+
+  memcpy(buffer + offset, ptr, len);
+  offset += len;
+}
+
+//===----------------------------------------------------------------------===//
+//                           Other
+//===----------------------------------------------------------------------===//
+
 /// Read the functions that are already traced by LLVM.
 ///
 /// \param path - the path to the InstrumentedFun file.
@@ -88,6 +149,8 @@ void LoadInstInfo(string path, vector<InstInfo> &info,
       ins.Type = InstInfo::PhiNode;
     } else if (tmp == "AtomicInst") {
       ins.Type = InstInfo::AtomicInst;
+    } else if (tmp == "AllocaInst") {
+      ins.Type = InstInfo::AllocaInst;
     } else {
       ins.Type = InstInfo::VarArg;
     }
@@ -187,4 +250,23 @@ int GetEvent(bool backward, const char *cur, char &event_label,
     length_ptr = (const uint64_t *)(cur + 29);
     return SizeOfMemmoveEvent;
   }
+}
+
+/// Identify external function calls that are always impactful
+bool IsImpactfulFunction(std::string name) {
+  if (name == "poll" ||
+    name == "fcntl" ||
+    name == "fclose" ||
+    name == "write" ||
+    name == "getpid" || 
+    name == "listen" ||
+    name == "close" || 
+    name == "fflush" ||
+    name == "signal" || 
+    name == "fstate" ||
+    name == "exit" ||
+    name.substr(0, 8) == "pthread_") {
+    return true;
+  }
+  return false;
 }

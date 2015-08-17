@@ -8,6 +8,6 @@ LEVEL=..
 #
 # List all of the subdirectories that we will compile.
 #
-DIRS = PTrace SlimmerGold PinTool ExtractMemoryDependency ExtractUneededOperation MergeTrace PrintBug
+DIRS = PTrace SlimmerGold PinTool PrintBug
 
 include $(LEVEL)/Makefile.common

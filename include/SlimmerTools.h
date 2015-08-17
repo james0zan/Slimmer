@@ -2,6 +2,7 @@
 #define SLIMMER_TOOLS_H
 
 #include "SlimmerUtil.h"
+#include "SegmentTree.hpp"
 
 #include <algorithm>
 #include <stack>
@@ -9,13 +10,29 @@
 
 using namespace std;
 
+//===----------------------------------------------------------------------===//
+//                        Common
+//===----------------------------------------------------------------------===//
+
+// Map an instruction ID to its instruction infomation
+extern vector<InstInfo> Ins;
+// Map a basic block ID to all the instructions that belong to it
+extern vector<vector<uint32_t> > BB2Ins;
+// A segment tree that maps a memory address to its group
+extern SegmentTree<int> *Addr2Group;
+// For each group, we use a segment tree to record all the memory addresses that
+// belong to it
+extern map<uint32_t, SegmentTree<int> *> Group2Addr;
+
+//===----------------------------------------------------------------------===//
+//                        Util
+//===----------------------------------------------------------------------===//
+
 namespace boost {
-void throw_exception(std::exception const &e) {}
+void throw_exception(std::exception const &e);
 }
 
-inline pair<uint64_t, uint32_t> I(uint64_t tid, uint32_t id) {
-  return make_pair(tid, id);
-}
+pair<uint64_t, uint32_t> I(uint64_t tid, uint32_t id);
 
 /// A smallest block is a continuous part of a basic block
 /// that will always be executed continuously.
@@ -30,7 +47,8 @@ struct SmallestBlock {
     ImpactfulCallBlock, // A single external call that impacts the outside
                         // enviroment
     MemsetBlock,        // A single memset
-    MemmoveBlock        // A single memset
+    MemmoveBlock,       // A single memset
+    DeclareBlock
   } Type;
 
   uint64_t TID;
@@ -58,239 +76,9 @@ struct SmallestBlock {
   SmallestBlock() {}
   SmallestBlock(SmallestBlockType t, uint64_t tid, uint32_t bb_id,
                 uint32_t start, uint32_t end, pair<uint8_t, uint32_t> first,
-                int32_t last_bb_id) {
-    Type = t;
-    TID = tid;
-    BBID = bb_id;
-    Start = start;
-    End = end;
-    IsFirst = first.first;
-    Caller = first.second;
-    IsLast = 0;
-    LastBBID = last_bb_id;
-  }
+                int32_t last_bb_id);
 
-  void Print(vector<InstInfo> &Ins, vector<vector<uint32_t> > &BB2Ins) {
-    if (Type == NormalBlock) {
-      printf(
-          "[Thead %lu] NormalBlock\n\t<BB %u, Index %u> -> <BB %u, Index %u>",
-          TID, BBID, Start, BBID, End);
-      printf("\n\tIsFirst %d IsLast %d Caller %u\n", IsFirst, IsLast, Caller);
-      printf("\tLastBBID %d\n", LastBBID);
-      for (uint32_t i = Start; i < End; ++i) {
-        printf("\t%u: %s\n", BB2Ins[BBID][i],
-               Ins[BB2Ins[BBID][i]].Code.c_str());
-      }
-    } else if (Type == MemoryAccessBlock || Type == MemsetBlock) {
-      printf("[Thead %lu] %s\n\t<BB %u, Index %u> Address [%p, %p)", TID,
-             Type == MemoryAccessBlock ? "MemoryAccessBlock" : "MemsetBlock",
-             BBID, Start, (void *)Addr[0], (void *)Addr[1]);
-      printf("\n\tIsFirst %d IsLast %d Caller %u\n", IsFirst, IsLast, Caller);
-      printf("\tLastBBID %d\n", LastBBID);
-      printf("\t%u: %s\n", BB2Ins[BBID][Start],
-             Ins[BB2Ins[BBID][Start]].Code.c_str());
-    } else if (Type == ExternalCallBlock || Type == ImpactfulCallBlock) {
-      printf("[Thead %lu] %s\n", TID, Type == ExternalCallBlock
-                                          ? "ExternalCallBlock"
-                                          : "ImpactfulCallBlock");
-      printf("\t<BB %u, Index %u> Address %p\n\tArg", BBID, Start,
-             (void *)Addr[0]);
-      for (size_t i = 1; i < Addr.size(); ++i)
-        printf(" %p", (void *)Addr[i]);
-      printf("\n\tIsFirst %d IsLast %d Caller %u\n", IsFirst, IsLast, Caller);
-      printf("\tLastBBID %d\n", LastBBID);
-      printf("\t%u: %s\n", BB2Ins[BBID][Start],
-             Ins[BB2Ins[BBID][Start]].Code.c_str());
-    } else if (Type == MemmoveBlock) {
-      printf("[Thead %lu] MemmoveBlock\n\t<BB %u, Index %u> Address [%p, %p) "
-             "[%p, %p)",
-             TID, BBID, Start, (void *)Addr[0], (void *)Addr[1],
-             (void *)Addr[2], (void *)Addr[3]);
-      printf("\n\tIsFirst %d IsLast %d Caller %u\n", IsFirst, IsLast, Caller);
-      printf("\tLastBBID %d\n", LastBBID);
-      printf("\t%u: %s\n", BB2Ins[BBID][Start],
-             Ins[BB2Ins[BBID][Start]].Code.c_str());
-    }
-  }
-
-  size_t Size() { return 39 + 8 * Addr.size(); }
-
-  /// Dump a SmallestBlock to a file.
-  ///
-  void Dump(FILE *f) {
-    uint32_t addr_size = Addr.size();
-    uint8_t type = 0;
-    if (Type == NormalBlock)
-      type = 0;
-    if (Type == MemoryAccessBlock)
-      type = 1;
-    if (Type == ExternalCallBlock)
-      type = 2;
-    if (Type == ImpactfulCallBlock)
-      type = 3;
-    if (Type == MemsetBlock)
-      type = 4;
-    if (Type == MemmoveBlock)
-      type = 5;
-
-    fwrite(&addr_size, sizeof(uint32_t), 1, f);
-    fwrite(&type, sizeof(uint8_t), 1, f);
-    fwrite(&TID, sizeof(uint64_t), 1, f);
-    fwrite(&BBID, sizeof(uint32_t), 1, f);
-    fwrite(&Start, sizeof(uint32_t), 1, f);
-    fwrite(&End, sizeof(uint32_t), 1, f);
-    fwrite(&IsFirst, sizeof(uint8_t), 1, f);
-    fwrite(&Caller, sizeof(uint32_t), 1, f);
-    fwrite(&IsLast, sizeof(uint8_t), 1, f);
-    fwrite(&LastBBID, sizeof(int32_t), 1, f);
-    for (auto i : Addr) {
-      fwrite(&i, sizeof(uint64_t), 1, f);
-    }
-    fwrite(&addr_size, sizeof(uint32_t), 1, f);
-  }
-
-  /// Dump a SmallestBlock to a buffer.
-  ///
-  void Dump(char *from) {
-    uint32_t addr_size = Addr.size();
-    uint8_t type = 0;
-    if (Type == NormalBlock)
-      type = 0;
-    if (Type == MemoryAccessBlock)
-      type = 1;
-    if (Type == ExternalCallBlock)
-      type = 2;
-    if (Type == ImpactfulCallBlock)
-      type = 3;
-    if (Type == MemsetBlock)
-      type = 4;
-    if (Type == MemmoveBlock)
-      type = 5;
-
-    (*(uint32_t *)(from)) = addr_size;
-    from += 4;
-    (*(uint8_t *)(from)) = type;
-    from += 1;
-    (*(uint64_t *)(from)) = TID;
-    from += 8;
-    (*(uint32_t *)(from)) = BBID;
-    from += 4;
-    (*(uint32_t *)(from)) = Start;
-    from += 4;
-    (*(uint32_t *)(from)) = End;
-    from += 4;
-    (*(uint8_t *)(from)) = IsFirst;
-    from += 1;
-    (*(uint32_t *)(from)) = Caller;
-    from += 4;
-    (*(uint8_t *)(from)) = IsLast;
-    from += 1;
-    (*(int32_t *)(from)) = LastBBID;
-    from += 4;
-    for (uint32_t i = 0; i < addr_size; ++i, from += 8) {
-      (*(uint64_t *)(from)) = Addr[i];
-    }
-    (*(uint32_t *)(from)) = addr_size;
-    from += 4;
-  }
-
-  /// Read a SmallestBlock from a file.
-  ///
-  /// \param from - the SmallestBlock is stored start from here
-  /// \return - the size of this SmallestBlock
-  ///
-  uint32_t ReadFrom(const char *&from) {
-    const char *origin = from;
-
-    uint32_t addr_size = (*(uint32_t *)(from));
-    from += 4;
-    uint8_t type = (*(uint8_t *)(from));
-    from += 1;
-    if (type == 0)
-      Type = NormalBlock;
-    if (type == 1)
-      Type = MemoryAccessBlock;
-    if (type == 2)
-      Type = ExternalCallBlock;
-    if (type == 3)
-      Type = ImpactfulCallBlock;
-    if (type == 4)
-      Type = MemsetBlock;
-    if (type == 5)
-      Type = MemmoveBlock;
-    TID = (*(uint64_t *)(from));
-    from += 8;
-    BBID = (*(uint32_t *)(from));
-    from += 4;
-    Start = (*(uint32_t *)(from));
-    from += 4;
-    End = (*(uint32_t *)(from));
-    from += 4;
-    IsFirst = (*(uint8_t *)(from));
-    from += 1;
-    Caller = (*(uint32_t *)(from));
-    from += 4;
-    IsLast = (*(uint8_t *)(from));
-    from += 1;
-    LastBBID = (*(int32_t *)(from));
-    from += 4;
-    Addr.clear();
-    for (uint32_t i = 0; i < addr_size; ++i, from += 8) {
-      Addr.push_back(*(uint64_t *)(from));
-    }
-    from += 4;
-
-    return from - origin;
-  }
-
-  /// Read a SmallestBlock from a file backwardly.
-  ///
-  /// \param data - the mmaped data buffer that reserve SmallestBlocks.
-  /// \param cur - the end of this SmallestBlock is stored at data[cur - 1].
-  /// \return - the size of this SmallestBlock
-  ///
-  void ReadBack(const char *&data, int64_t &cur) {
-    cur -= 4;
-    uint32_t addr_size = (*(uint32_t *)(&data[cur]));
-    Addr.clear();
-    for (uint32_t i = 0; i < addr_size; ++i) {
-      cur -= 8;
-      Addr.push_back(*(uint64_t *)(&data[cur]));
-    }
-    reverse(Addr.begin(), Addr.end());
-
-    cur -= 4;
-    LastBBID = (*(int32_t *)(&data[cur]));
-    cur -= 1;
-    IsLast = (*(uint8_t *)(&data[cur]));
-    cur -= 4;
-    Caller = (*(uint32_t *)(&data[cur]));
-    cur -= 1;
-    IsFirst = (*(uint8_t *)(&data[cur]));
-    cur -= 4;
-    End = (*(uint32_t *)(&data[cur]));
-    cur -= 4;
-    Start = (*(uint32_t *)(&data[cur]));
-    cur -= 4;
-    BBID = (*(uint32_t *)(&data[cur]));
-    cur -= 8;
-    TID = (*(uint64_t *)(&data[cur]));
-    cur -= 1;
-    uint8_t type = (*(uint8_t *)(&data[cur]));
-    if (type == 0)
-      Type = NormalBlock;
-    if (type == 1)
-      Type = MemoryAccessBlock;
-    if (type == 2)
-      Type = ExternalCallBlock;
-    if (type == 3)
-      Type = ImpactfulCallBlock;
-    if (type == 4)
-      Type = MemsetBlock;
-    if (type == 5)
-      Type = MemmoveBlock;
-    cur -= 4;
-  }
+  void Print(vector<InstInfo> &Ins, vector<vector<uint32_t> > &BB2Ins);
 };
 
 /// An iterator for the compressed trace data.
@@ -309,191 +97,30 @@ struct TraceIter {
   }
 
   /// Prepare the decompressed data
-  ///
-  /// \return - return false if the trace is ended.
-  ///
-  bool Prepare() {
-    if (decoded_iter >= decoded_size) {
-      if (ended || data_iter >= trace.size())
-        return false; // Trace is ended
-      uint64_t length = (*(uint64_t *)(&data[data_iter]));
-      data_iter += sizeof(uint64_t);
-
-      decoded_size = LZ4_decompress_safe((const char *)&data[data_iter],
-                                         decoded, length, COMPRESS_BLOCK_SIZE);
-      assert(decoded_size > 0);
-      decoded_iter = 0;
-
-      data_iter += length + sizeof(uint64_t);
-    }
-    return true;
-  }
-
-  /// Obtain the len bytes
-  ///
-  /// \param ptr - destination of the data.
-  /// \param len - length of the data.
-  /// \return - return false if the trace is ended.
-  ///
-  bool Next(void *ptr, size_t len) {
-    if (!Prepare())
-      return false;
-
-    memcpy(ptr, decoded + decoded_iter, len);
-    decoded_iter += len;
-    return true;
-  }
-
+  bool Prepare();
+  /// Obtain len bytes
+  bool Next(void *ptr, size_t len);
   /// Obtain the next event.
-  ///
-  /// \param * - stores the corresponding field of the next event.
-  /// \return - return false if the trace is ended.
-  ///
   bool NextEvent(char &event_label, const uint64_t *&tid_ptr,
                  const uint32_t *&id_ptr, const uint64_t *&addr_ptr,
-                 const uint64_t *&length_ptr, const uint64_t *&addr2_ptr) {
-    if (!Prepare())
-      return false;
-
-    decoded_iter += GetEvent(false, decoded + decoded_iter, event_label,
-                             tid_ptr, id_ptr, addr_ptr, length_ptr, addr2_ptr);
-    if (event_label == EndEventLabel)
-      ended = true;
-    return true;
-  }
-
-  /// Obtain the next SmallestBlock.
-  ///
-  /// \param b - stores the corresponding SmallestBlock.
-  /// \return - return false if the trace is ended.
-  ///
-  bool NextSmallestBlock(SmallestBlock &b) {
-    if (!Prepare())
-      return false;
-
-    const char *cur = decoded + decoded_iter;
-    decoded_iter += b.ReadFrom(cur);
-    return true;
-  }
+                 const uint64_t *&length_ptr, const uint64_t *&addr2_ptr);
 };
 
-/// A backward iterator for the compressed trace data.
-struct BackwardTraceIter {
-  boost::iostreams::mapped_file_source trace;
-  const char *data;
-  char *decoded;
-  int64_t data_iter, decoded_iter, decoded_size;
+//===----------------------------------------------------------------------===//
+//                        Other
+//===----------------------------------------------------------------------===//
 
-  BackwardTraceIter(char *trace_file_name) : trace(trace_file_name) {
-    data = trace.data();
-    decoded = (char *)malloc(COMPRESS_BLOCK_SIZE);
-    data_iter = trace.size();
-    decoded_iter = -1;
-    decoded_size = 0;
-  }
+void ExtractImpactfulFunCall(
+  char *pin_trace_file_name, set<uint64_t> &impactful_fun_call);
 
-  /// Prepare the decompressed data
-  bool Prepare() {
-    if (decoded_iter <= 0) {
-      if (data_iter <= 0)
-        return false; // Trace is ended
-      data_iter -= sizeof(uint64_t);
-      uint64_t length = (*(uint64_t *)(&data[data_iter]));
-      data_iter -= length;
+void MergeTrace(
+  char *trace_file_name, set<uint64_t> &impactful_fun_call,
+  vector<SmallestBlock> &block_trace);
 
-      decoded_size = LZ4_decompress_safe((const char *)&data[data_iter],
-                                         decoded, length, COMPRESS_BLOCK_SIZE);
-      decoded_iter = decoded_size;
+void GroupMemory(vector<SmallestBlock> &block_trace);
 
-      data_iter -= sizeof(uint64_t);
-    }
-    return true;
-  }
-
-  /// Obtain the former SmallestBlock.
-  ///
-  /// \param b - stores the corresponding SmallestBlock.
-  /// \return - return false if the trace is ended.
-  ///
-  bool FormerSmallestBlock(SmallestBlock &b) {
-    if (!Prepare())
-      return false;
-
-    const char *tmp = decoded;
-    b.ReadBack(tmp, decoded_iter);
-    return true;
-  }
-};
-
-/// Stream buffer for appending compressed data
-class CompressBuffer {
-public:
-  CompressBuffer(const char *path) {
-    size = COMPRESS_BLOCK_SIZE;
-
-    buffer = (char *)malloc(size);
-    compressed = (char *)malloc(LZ4_compressBound(size));
-    assert(buffer && compressed && "Failed to malloc the CompressBuffer!\n");
-
-    stream = fopen(path, "wb");
-    assert(stream && "Failed to open tracing file!\n");
-    offset = 0;
-  }
-
-  ~CompressBuffer() {
-    uint64_t after_compress =
-        LZ4_compress_limitedOutput((const char *)buffer, (char *)compressed,
-                                   offset, LZ4_compressBound(size));
-    fwrite(&after_compress, sizeof(after_compress), 1, stream);
-    size_t cur = 0;
-    while (cur < after_compress) {
-      size_t tmp = fwrite(compressed + cur, 1, after_compress - cur, stream);
-      if (tmp > 0)
-        cur += tmp;
-    }
-    fwrite(&after_compress, sizeof(after_compress), 1, stream);
-    fclose(stream);
-  }
-
-  /// Prepare a buffer larger than len
-  void Prepare(size_t len) {
-    if (offset + len > size) {
-      uint64_t after_compress =
-          LZ4_compress_limitedOutput((const char *)buffer, (char *)compressed,
-                                     offset, LZ4_compressBound(size));
-      fwrite(&after_compress, sizeof(after_compress), 1, stream);
-      size_t cur = 0;
-      while (cur < after_compress) {
-        size_t tmp = fwrite(compressed + cur, 1, after_compress - cur, stream);
-        if (tmp > 0)
-          cur += tmp;
-      }
-      fwrite(&after_compress, sizeof(after_compress), 1, stream);
-      offset = 0;
-    }
-  }
-
-  /// Append [ptr, ptr+len) to the buffer.
-  void Append(void *ptr, size_t len) {
-    Prepare(len);
-
-    memcpy(buffer + offset, ptr, len);
-    offset += len;
-  }
-
-  /// Append a SmallestBlock to the buffer.
-  void Append(SmallestBlock &b) {
-    Prepare(b.Size());
-
-    b.Dump(buffer + offset);
-    offset += b.Size();
-  }
-
-private:
-  char *buffer, *compressed;
-  FILE *stream;
-  size_t offset;
-  size_t size; // Size of the event buffer in bytes
-};
+void ExtractMemoryDependency(
+  vector<SmallestBlock> &block_trace,
+  map<DynamicInst, vector<DynamicInst> > &mem_dep);
 
 #endif // SLIMMER_TOOLS_H

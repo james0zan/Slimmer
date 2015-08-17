@@ -310,6 +310,22 @@ __attribute__((always_inline)) void recordMemoryEvent(uint32_t id, void *addr,
   DEBUG("[MemoryEvent] id = %u, addr = %p, len = %lu\n", id, addr, length);
 }
 
+
+__attribute__((always_inline)) void recordCallocEvent(uint32_t id, void *addr,
+                                                      uint64_t num, uint64_t length) {
+  char *buffer = event_buffer.StartAppend(SizeOfMemoryEvent);
+
+  *buffer = MemoryEventLabel;
+  (*(uint64_t *)(buffer + 1)) = local_tid;
+  (*(uint32_t *)(buffer + 9)) = id;
+  (*(uint64_t *)(buffer + 13)) = (uint64_t)addr;
+  (*(uint64_t *)(buffer + 21)) = num * length;
+  *(buffer + 29) = MemoryEventLabel;
+
+  event_buffer.EndAppend();
+  DEBUG("[MemoryEvent] id = %u, addr = %p, len = %lu\n", id, addr, length);
+}
+
 /// Append a MemoryEvent for a store instruction to the trace buffer.
 ///
 /// \param id - the instruction ID.
