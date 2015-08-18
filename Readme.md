@@ -29,24 +29,27 @@ liblz4-dev
 # Usages
 
 The usage of Slimmer consists of three steps: 1) statically instrumenting the target program for generating traces; 2) running the application with PIN for identifying impactful external function calls;
-and 2) analyzing the traces for finding potential bug sites.
+and 3) analyzing the traces for finding potential bug sites.
 
 Specifically, the static instrumenting part of Slimmer is implemented with a LLVM pass
 ([lib/SlimmerTrace](https://github.com/james0zan/Slimmer/tree/master/lib/SlimmerTrace)).
 Thus the users need to append it to the analyses chain for enabling the tracing.
 For facilitating this procedure, we built our own version of gold plugin
-([lib/SlimmerTrace](https://github.com/james0zan/Slimmer/tree/master/lib/SlimmerTrace))
-that has already integrated with the instrumenting pass.
+([tools/SlimmerGold](https://github.com/james0zan/Slimmer/tree/master/tools/SlimmerGold))
+that has already been integrated with the instrumenting pass.
 
 As a summary, in order to instrument the target program, the user need to:
-1) replace the standard gold plugin with the compiled "lib/SlimmerGold.so";
-2) compile the target program with LTO enabled (-flto);
-3) linking the program with additional runtime libraries required by Slimmer (-lSlimmerRuntime -lpthread -lstdc++ -llz4).
+
+1. replace the standard gold plugin with the compiled "lib/SlimmerGold.so";
+
+2. compile the target program with LTO enabled (-flto);
+
+3. linking the program with additional runtime libraries required by Slimmer (-lSlimmerRuntime -lpthread -lstdc++ -llz4).
 
 More detailed description of LTO and gold plugin can be found at [here](http://llvm.org/docs/LinkTimeOptimization.html) and [here](http://llvm.org/docs/GoldPlugin.html).
 
-After instrumenting, the user only need to execute the program with our PIN tool (lib/SlimmerPinTool.so)
-for generating traces and use the analyzing tool (bin/print-bug) for finding potential bug sites.
+After instrumenting, the user only needs to execute the program with our PIN tool (lib/SlimmerPinTool.so)
+for generating traces and uses the analyzing tool (bin/print-bug) for finding potential bug sites.
 
 # Example
 
@@ -76,8 +79,8 @@ It is obvious that all the iterations after "flag" set to "true" do not perform 
     clang++ -flto -g -O0 UnusedLaterLoop.cpp -o UnusedLaterLoop -L../../build/Release+Asserts/lib -lSlimmerRuntime -lpthread -lstdc++ -llz4
 
 The above compiling command will not only generate an instrumented application but also a set of code information files that will be needed in the analyzing (see [doc/Instrumenting.md](https://github.com/james0zan/Slimmer/tree/master/doc/Instrumenting.md) for more information).
+
 The folder for reserving these information files will be printed to standard output stream while the compiling.
-In this case, we assume the path to this directory is "Slimmer/123"
 
 ## Running & Analyzing
 
@@ -85,7 +88,8 @@ In this case, we assume the path to this directory is "Slimmer/123"
     print-bug path/to/SlimmerInfoDir path/to/SlimmerTrace path/to/SlimmerPinTrace
 
 When running the application with the PIN tool, the program itself will generate a trace file (default to be named as SlimmerTrace) and the PIN tool will also generate another trace file (default to be named as SlimmerPinTrace).
-By providing all the data to the "pint-bug" tool it will be able to print the potential bugs sites.
+
+By providing all these data to the "pint-bug" tool it will be able to print the potential bugs sites.
 
 ## Result
 
@@ -137,6 +141,7 @@ The output of the above program will be:
             15:   }
 
 As we can see, the "Bug 2" is the bug that we have described above.
+
 In contrast, "Bug 1" is caused by the fact that the initialization of flag is not used in this case,
 because it is overwritten before any useful read.
 This is an unneeded operation that satisfies our definition, but it is not a bug since it may be used in other test cases.
