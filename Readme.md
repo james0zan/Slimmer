@@ -24,162 +24,120 @@ liblz4-dev
 
     CC=$LLVM_BIN/clang CXX=$LLVM_BIN/clang++ ../configure --with-llvmsrc=$LLVM_SRC --with-llvmobj=$LLVM_OBJ --with-binutils-include=$BINUTILS_INCLUDE --enable-optimized=yes
 
-    PIN_HOME=$PIN CC=$LLVM_BIN/clang CXX=$LLVM_BIN/clang++ CPPFLAGS="-I/usr/include/c++/4.8/ -I/usr/include/x86_64-linux-gnu/c++/4.8/" CXXFLAGS="-std=c++11" VERBOSE=1 make
+    PIN_HOME=$PIN CC=$LLVM_BIN/clang CXX=$LLVM_BIN/clang++ CPPFLAGS="-I/usr/include/c++/4.8/ -I/usr/include/x86_64-linux-gnu/c++/4.8/" CXXFLAGS="-std=c++11" make
 
-# Traced Events
+# Usages
 
-## BasicBlockEvent
+The usage of Slimmer consists of three steps: 1) statically instrumenting the target program for generating traces; 2) running the application with PIN for identifying impactful external function calls;
+and 2) analyzing the traces for finding potential bug sites.
 
-A BasicBlockEvent is logged at the beginning of each basic block.
-It is used to infer the control dependencies.
+Specifically, the static instrumenting part of Slimmer is implemented with a LLVM pass
+([lib/SlimmerTrace](https://github.com/james0zan/Slimmer/tree/master/lib/SlimmerTrace)).
+Thus the users need to append it to the analyses chain for enabling the tracing.
+For facilitating this procedure, we built our own version of gold plugin
+([lib/SlimmerTrace](https://github.com/james0zan/Slimmer/tree/master/lib/SlimmerTrace))
+that has already integrated with the instrumenting pass.
 
-The fields of a BasicBlockEvent are:
+As a summary, in order to instrument the target program, the user need to:
+1) replace the standard gold plugin with the compiled "lib/SlimmerGold.so";
+2) compile the target program with LTO enabled (-flto);
+3) linking the program with additional runtime libraries required by Slimmer (-lSlimmerRuntime -lpthread -lstdc++ -llz4).
 
-    id: the unique basic block ID
-    tid: the thread that executes this basic block
+More detailed description of LTO and gold plugin can be found at [here](http://llvm.org/docs/LinkTimeOptimization.html) and [here](http://llvm.org/docs/GoldPlugin.html).
 
-## MemoryEvent
+After instrumenting, the user only need to execute the program with our PIN tool (lib/SlimmerPinTool.so)
+for generating traces and use the analyzing tool (bin/print-bug) for finding potential bug sites.
 
-A MemoryEvent is logged for each memory load/store.
-It is used to infer the data dependencies.
+# Example
 
-The fields of a MemoryEvent are:
+Here is an example for showcasing how to use Slimmer for finding potential performance bugs.
 
-    id: the unique instruction ID of the load/store instruction
-    tid: the thread that executes this instruction
-    addr: the starting address of the loaded/stored memory
-    size: the size of the loaded/stored data
+## The example code
 
-We can determine whether the instruction is a load or store by its ID.
+    #include <stdio.h>
 
-## CallEvent & ReturnEvent & ArgumentEvent
-
-A pair of CallEvent and ReturnEvent is logged for each **uninstrumented** function.
-It is used to infer the data that impacts the outside system.
-
-The fields of a CallEvent/ReturnEvent are:
-
-    id: the unique instruction ID of the call instruction
-    tid: the thread that executes this instruction
-    fun: the starting address of the function
-
-The ArgumentEvent is used for recording the pointer arguments of the uninstrumented functions.
-It contains only two fields, which are:
-
-    tid: the thread that executes this instruction
-    arg: the value of the pointer argument
-
-# Code Information (generated while linking)
-
-## Inst
-
-The ``Inst" file maps an instruction ID to the corresponding information,
-in which each line is:
-
-    InstructionID:
-        BasicBlockID,
-        Is a pointer or not,
-        Line of code or -1 if not available,
-        Path to the code file (in base64) or [UNKNOWN] if not available,
-        The instruction's LLVM IR (in base64),
-        [SSA dependency 1, SSA dependency 2, ..., ],
-        Type = {NormalInst, LoadInst, StoreInst, CallInst, TerminatorInst, PhiNode, VarArg},
-        {
-            For CallInst: {
-                The called function name or [UNKNOWN] if not available,
-            },
-            For TerminatorInst: {
-                [BasicBlockID of successor 1, BasicBlockID of successor 2, ..., ]
-            },
-            For PhiNode: {
-                [<Income BasicBlockID 1, Income value>, <Income BasicBlockID 2, Income value>, ..., ]
-            },
-        },
-        
-
-A data dependency (i.e., a SSA dependency or a income value for the PhiNode) is represented as:
-
-    <
-        Type = {Inst, Arg, Constant},
-        ID: {
-            For Inst: the InstructionID,
-            For Arg: which argument it uses,
-            For Constant: 0
+    int main() {
+      bool flag = false;
+      for (int i = 0; i < 4; ++i) {
+        if (i == 2) {
+          flag = true;
         }
-    >
+      }
+      printf("%d\n", flag);
+    }
 
-As for the intrinsic functions of LLVM, they are interpreted as several instructions.
-Specifically, 
+The above code is a simple version of [GCC#57812](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=57812),
+in which the loop should break immediately after "flag" is set to "true".
+It is obvious that all the iterations after "flag" set to "true" do not perform any useful work.
 
-1. "llvm.memset." is interpreted as a store instruction;
-2. both "llvm.memcpy." and "llvm.memmove." are interpreted as a load instruction **and** a store instruction.
-3. "llvm.va_start" and "llvm.va_end" are interpreted as a normal instruction with type "VarArg". They are used for linking the use of a variable-number argument to the argument's definition.
+## Instrumenting
 
-## InstrumentedFun
+    cd test/SyntheticBugs/
+    clang++ -flto -g -O0 UnusedLaterLoop.cpp -o UnusedLaterLoop -L../../build/Release+Asserts/lib -lSlimmerRuntime -lpthread -lstdc++ -llz4
 
-The name of instrumented functions.
-One function per line.
+The above compiling command will not only generate an instrumented application but also a set of code information files that will be needed in the analyzing (see [doc/Instrumenting.md](https://github.com/james0zan/Slimmer/tree/master/doc/Instrumenting.md) for more information).
+The folder for reserving these information files will be printed to standard output stream while the compiling.
+In this case, we assume the path to this directory is "Slimmer/123"
 
-# Algorithm for Generating Unused Operations
+## Running & Analyzing
 
-    addr2load := a map that maps the memory address to a list of instructions that load it
-    data_dep := a map that maps an load instruction to the depended store instructions
-    used_ins = a set of instructions that are used
+    pin.sh -t path/to/SlimmerPinTool.so -i path/to/InstrumentedFun -- ./UnusedLaterLoop
+    print-bug path/to/SlimmerInfoDir path/to/SlimmerTrace path/to/SlimmerPinTrace
 
-    used_ins.add(LastReturn())
-    for event <- [last event, ..., first event]:
-        if event is ReturnEvent or MemoryEvent:
-            ins := <event.tid, event.id>
-            writed_addr = GetWrited(event)
-            read_addr = GetRead(event)
+When running the application with the PIN tool, the program itself will generate a trace file (default to be named as SlimmerTrace) and the PIN tool will also generate another trace file (default to be named as SlimmerPinTrace).
+By providing all the data to the "pint-bug" tool it will be able to print the potential bugs sites.
 
-            used, loads = addr2load.Eliminate(writed_addr)
-            for i in loads: data_dep[i].add(ins)
-            addr2load.Add(read_addr, ins)
+## Result
 
-            if event is ReturnEvent and event.fun impacts the outside:
-                used = true
+The output of the above program will be:
 
-            if used:
-                used_ins.add(ins)
-                addr2load.MarkUsed(ins)
-        if event is BasicBlockEvent:
-            for ins_id <- [last ins of the BB, ..., first]:
-                ins := <event.tid, ins_id>
-                if ins in used_ins:
-                    used_ins.remove(ins)
-                    addr2load.MarkUsed(ins)
+    ===============
+    Bug 1
+    ===============
 
-                    for i in data_dep[ins]: used_ins.add(i)
-                    data_dep.Remove(ins)
+    ------IR------
+    (   1)  4:    store i8 0, i8* %flag, align 1, !dbg !14
 
-                    used_ins.add(GetSSADep(ins))
-                    used_ins.add(GetControlDep(ins))
-                    if ins_id is CallInst:
-                        used_ins.add(GetFunReturnDep(ins))                    
-                else:
-                    OutputUnusedIns(ins)
+    ------Related Code------
 
-# Simple Dynamic AA
+    test/SyntheticBugs/UnusedLaterLoop.cpp
 
-A disjoint set is used for maintaining the infomation of pointer groups.
+            7:  #include <stdio.h>
+            9:  int main() {
+    (   1)  10:   bool flag = false;
+            11:   for (int i = 0; i < 4; ++i) {
+            12:     if (i == 2) {
+            13:       flag = true;
 
-The GetWrited and GetRead function of a ReturnEvent is implemented by union all the pointers' group of that function's parameters.
+    ===============
+    Bug 2
+    ===============
 
-    for event <- [last event, ..., first event]:
-        if event is MemoryEvent:
-            AddAddrToGroup(GetGroupID(event.id), event.addr, event.length)
-        if event is BasicBlockEvent:
-            for ins_id <- [last ins of the BB, ..., first]:
-                if the result of ins_id is a pointer:
-                    for i in GetSSADep(ins):
-                        if i is a pointer:
-                            UnionGroup(GetGroupID(ins_id), GetGroupID(i))
-                RemoveGroupInfo(ins_id)
+    ------IR------
+    (   2)  7:    %0 = load i32* %i, align 4, !dbg !17
+    (   2)  8:    %cmp = icmp slt i32 %0, 4, !dbg !17
+    (   2)  9:    br i1 %cmp, label %for.body, label %for.end, !dbg !17
+    (   1)  10:   %1 = load i32* %i, align 4, !dbg !18
+    (   1)  11:   %cmp1 = icmp eq i32 %1, 2, !dbg !18
+    (   1)  12:   br i1 %cmp1, label %if.then, label %if.end, !dbg !18
+    (   2)  16:   %2 = load i32* %i, align 4, !dbg !17
+    (   2)  17:   %inc = add nsw i32 %2, 1, !dbg !17
+    (   2)  18:   store i32 %inc, i32* %i, align 4, !dbg !17
 
+    ------Related Code------
 
+    test/SyntheticBugs/UnusedLaterLoop.cpp
 
+            9:  int main() {
+            10:   bool flag = false;
+    (  12)  11:   for (int i = 0; i < 4; ++i) {
+    (   3)  12:     if (i == 2) {
+            13:       flag = true;
+            14:     }
+            15:   }
 
-
-
+As we can see, the "Bug 2" is the bug that we have described above.
+In contrast, "Bug 1" is caused by the fact that the initialization of flag is not used in this case,
+because it is overwritten before any useful read.
+This is an unneeded operation that satisfies our definition, but it is not a bug since it may be used in other test cases.
 
