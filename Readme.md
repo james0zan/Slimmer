@@ -36,7 +36,7 @@ Specifically, the static instrumenting part of Slimmer is implemented with a LLV
 Thus the users need to append it to the analyses chain for enabling the tracing.
 For facilitating this procedure, we built our own version of gold plugin
 ([tools/SlimmerGold](https://github.com/james0zan/Slimmer/tree/master/tools/SlimmerGold))
-that has already been integrated with the instrumenting pass.
+that has the instrumenting pass enabled automatically.
 
 As a summary, in order to instrument the target program, the user need to:
 
