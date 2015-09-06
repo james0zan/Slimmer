@@ -115,6 +115,8 @@ void DumpCompressed(CircularBuffer *cb) {
 /// \param name - the path to the trace file.
 ///
 void CircularBuffer::Init(const char *name) {
+  if (inited) return;
+
   size = COMPRESS_BLOCK_SIZE;
 
   for (int i = 0; i < COMPRESS_BLOCK_CNT; ++i) {

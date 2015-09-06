@@ -45,6 +45,7 @@ struct SlimmerTrace : public ModulePass {
 
   // Pointers to other passes
   const DataLayout *dataLayout;
+  Function *MainFunction = NULL;
 
   // The output files
   std::fstream fInst;
@@ -155,7 +156,15 @@ std::string SlimmerTrace::CommonInfo(Instruction *ins) {
                                ins_string.length()) << "\n";
 
   // SSA dependencies
-  rso << "\t" << ins->getNumOperands() << " ";
+  int op_cnt = 0;
+  for (unsigned index = 0; index < ins->getNumOperands(); ++index) {
+    if (Instruction *tmp = dyn_cast<Instruction>(ins->getOperand(index))) {
+      if (ins2ID.count(tmp) == 0)
+        continue;
+    }
+    op_cnt++;
+  }
+  rso << "\t" << op_cnt << " ";
   for (unsigned index = 0; index < ins->getNumOperands(); ++index) {
     if (Instruction *tmp = dyn_cast<Instruction>(ins->getOperand(index))) {
       if (ins2ID.count(tmp) == 0)
@@ -176,7 +185,17 @@ std::string SlimmerTrace::CommonInfo(Instruction *ins) {
 }
 
 bool SlimmerTrace::doInitialization(Module &module) {
-  // LOG(DEBUG, "SlimmerTrace::doInitialization") << "Start";
+  LOG(DEBUG, "SlimmerTrace::doInitialization") << "Start";
+
+  MainFunction = NULL;
+  for (Module::iterator fun_ptr = module.begin(), fun_end = module.end(); fun_ptr != fun_end; ++fun_ptr) {
+    if (fun_ptr->isDeclaration()) continue;
+    std::string fun_name = fun_ptr->stripPointerCasts()->getName().str();
+    if (fun_name == "main") {
+      MainFunction = fun_ptr;
+    }
+  }
+  if (MainFunction == NULL) return false;
 
   // Reserve the infomation directory and the files
   srand(time(NULL));
@@ -290,12 +309,13 @@ bool notTraced(Instruction *ins) {
 
 bool SlimmerTrace::runOnModule(Module &module) {
   // LOG(DEBUG, "SlimmerTrace::runOnModule") << "Start";
+  if (MainFunction == NULL) return false;
 
   dataLayout = &getAnalysis<DataLayout>();
 
   // The basic block (instruction) ID is started from 0
   uint32_t bb_id = 0, ins_id = 0;
-  Function *main_function = NULL;
+  
   std::vector<Instruction *> ins_list;
   for (Module::iterator fun_ptr = module.begin(), fun_end = module.end();
        fun_ptr != fun_end; ++fun_ptr) {
@@ -304,9 +324,7 @@ bool SlimmerTrace::runOnModule(Module &module) {
     std::string fun_name = fun_ptr->stripPointerCasts()->getName().str();
     instrumentedFun.insert(fun_name);
     fInstrumentedFun << fun_name << "\n";
-    if (fun_name == "main") {
-      main_function = fun_ptr;
-    }
+
     for (Function::iterator bb_ptr = fun_ptr->begin(), bb_end = fun_ptr->end();
          bb_ptr != bb_end; ++bb_ptr) {
       bb2ID[bb_ptr] = bb_id++;
@@ -324,7 +342,7 @@ bool SlimmerTrace::runOnModule(Module &module) {
   }
 
   {
-    Instruction *last = main_function->begin()->begin();
+    Instruction *last = MainFunction->begin()->begin();
     for (Module::global_iterator gi = module.global_begin(),
                                  gend = module.global_end();
          gi != gend; ++gi) {

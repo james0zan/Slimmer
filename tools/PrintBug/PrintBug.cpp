@@ -461,13 +461,18 @@ int main(int argc, char *argv[]) {
   }
 
   string slimmer_dir = argv[1];
+  printf("LoadInstInfo\n");
   LoadInstInfo(slimmer_dir + "/Inst", Ins, BB2Ins);
+  printf("ExtractImpactfulFunCall\n");
   ExtractImpactfulFunCall(argv[3], ImpactfulFunCall);
+  printf("MergeTrace\n");
   MergeTrace(argv[2], ImpactfulFunCall, BlockTrace);
 
   Addr2Group = SegmentTree<int>::NewTree();
   Group2Addr.clear();
+  printf("GroupMemory\n");
   GroupMemory(BlockTrace);
+  printf("ExtractMemoryDependency\n");
   ExtractMemoryDependency(BlockTrace, MemDependencies);
   delete Addr2Group;
   for (auto &i : Group2Addr) {
@@ -475,9 +480,12 @@ int main(int argc, char *argv[]) {
   }
   Group2Addr.clear();
 
+  printf("PreparePostDominator\n");
   PreparePostDominator(slimmer_dir + "/BBGraph", PostDominator);
 
   set<DynamicInst> bug;
+  printf("ExtractUneededOperation\n");
   ExtractUneededOperation(BlockTrace, bug);
+  printf("PrintBug\n");
   PrintBug(bug);
 }
