@@ -5,15 +5,30 @@
 //===----------------------------------------------------------------------===//
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <stdint.h>
+#include <string.h>
+
+int a, b;
+
+void Foo(int flags) {
+  if (flags & 1) {
+    a = 1;
+  }
+  if (flags & 2) {
+    b = 2;
+  }
+}
 
 int main() {
-  bool flag = false, flag2 = true;
-  int x = 0;
+  a = b = 0;
+  Foo(3);
+  printf("%d\n", a);
 
-  if (flag) {
-    x = 1;
-  } else if (!flag2) {
-     x = 2;
+  while(1) {
+    usleep(10000000);
+    printf("HERE\n");
   }
-  printf("%d\n", x);
 }

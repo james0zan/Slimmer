@@ -1,5 +1,7 @@
 #include "SlimmerTools.h"
 
+// #define SLIMMER_PRINT_BLOCKS
+
 // Recording the basic block stack.
 // The last executed instruction is
 // the CurIndex-th instruction of basic block BBID.
@@ -46,31 +48,32 @@ void MergeTrace(char *trace_file_name, set<uint64_t> &impactful_fun_call,
   while (iter.NextEvent(event_label, tid_ptr, id_ptr, addr_ptr, length_ptr,
                         addr2_ptr)) {
 
-    // switch (event_label) {
-    //   case BasicBlockEventLabel:
-    //     printf("BasicBlockEvent:  %lu\t%u\n", *tid_ptr, *id_ptr);
-    //     break;
-    //   case MemoryEventLabel:
-    //     printf("MemoryEvent:      %lu\t%u\t%p\t%lu\n", *tid_ptr, *id_ptr,
-    // (void*)*addr_ptr, *length_ptr);
-    //     break;
-    //   case ReturnEventLabel:
-    //     printf("ReturnEvent:      %lu\t%u\t%p\n", *tid_ptr, *id_ptr,
-    // (void*)*addr_ptr);
-    //     break;
-    //   case ArgumentEventLabel:
-    //     printf("ArgumentEvent:    %lu\t%p\n", *tid_ptr, (void*)*addr_ptr);
-    //     break;
-    //   case  MemsetEventLabel:
-    //     printf("MemsetEvent:      %lu\t%u\t%p\t%lu\n", *tid_ptr, *id_ptr,
-    // (void*)*addr_ptr, *length_ptr);
-    //     break;
-    //   case  MemmoveEventLabel:
-    //     printf("MemmoveEvent:     %lu\t%u\t%p\t%p\t%lu\n", *tid_ptr, *id_ptr,
-    // (void*)*addr_ptr, (void*)*addr2_ptr, *length_ptr);
-    //     break;
-    // }
-
+#ifdef SLIMMER_PRINT_BLOCKS
+    switch (event_label) {
+      case BasicBlockEventLabel:
+        printf("BasicBlockEvent:  %lu\t%u\n", *tid_ptr, *id_ptr);
+        break;
+      case MemoryEventLabel:
+        printf("MemoryEvent:      %lu\t%u\t%p\t%lu\n", *tid_ptr, *id_ptr,
+    (void*)*addr_ptr, *length_ptr);
+        break;
+      case ReturnEventLabel:
+        printf("ReturnEvent:      %lu\t%u\t%p\n", *tid_ptr, *id_ptr,
+    (void*)*addr_ptr);
+        break;
+      case ArgumentEventLabel:
+        printf("ArgumentEvent:    %lu\t%p\n", *tid_ptr, (void*)*addr_ptr);
+        break;
+      case  MemsetEventLabel:
+        printf("MemsetEvent:      %lu\t%u\t%p\t%lu\n", *tid_ptr, *id_ptr,
+    (void*)*addr_ptr, *length_ptr);
+        break;
+      case  MemmoveEventLabel:
+        printf("MemmoveEvent:     %lu\t%u\t%p\t%p\t%lu\n", *tid_ptr, *id_ptr,
+    (void*)*addr_ptr, (void*)*addr2_ptr, *length_ptr);
+        break;
+    }
+#endif
     // Collecting the arguments of a function call event
     if (event_label == ArgumentEventLabel) {
       args[*tid_ptr].insert(*addr_ptr);
@@ -81,7 +84,9 @@ void MergeTrace(char *trace_file_name, set<uint64_t> &impactful_fun_call,
       b.Type = SmallestBlock::DeclareBlock;
       b.Addr.push_back(*addr_ptr);
       b.Addr.push_back(*addr_ptr + *length_ptr);
-      // b.Print(Ins, BB2Ins);
+#ifdef SLIMMER_PRINT_BLOCKS
+      b.Print(Ins, BB2Ins);
+#endif
       block_trace.push_back(b);
       continue;
     }
@@ -110,7 +115,9 @@ void MergeTrace(char *trace_file_name, set<uint64_t> &impactful_fun_call,
         b.Type = SmallestBlock::DeclareBlock;
         b.Addr.push_back(*addr_ptr);
         b.Addr.push_back(*addr_ptr + *length_ptr);
-        // b.Print(Ins, BB2Ins);
+#ifdef SLIMMER_PRINT_BLOCKS
+        b.Print(Ins, BB2Ins);
+#endif
         block_trace.push_back(b);
       } else { // A memory access block
         StackInfo &info = call_stack[*tid_ptr].back();
@@ -123,7 +130,9 @@ void MergeTrace(char *trace_file_name, set<uint64_t> &impactful_fun_call,
         b.Addr.push_back(*addr_ptr);
         b.Addr.push_back(*addr_ptr + *length_ptr);
 
-        // b.Print(Ins, BB2Ins);
+#ifdef SLIMMER_PRINT_BLOCKS
+        b.Print(Ins, BB2Ins);
+#endif
         block_trace.push_back(b);
         is_first[*tid_ptr] = make_pair(0, 0);
       }
@@ -147,7 +156,9 @@ void MergeTrace(char *trace_file_name, set<uint64_t> &impactful_fun_call,
       }
 
       fun_counter[I(*tid_ptr, *addr_ptr)]++;
-      // b.Print(Ins, BB2Ins);
+#ifdef SLIMMER_PRINT_BLOCKS
+      b.Print(Ins, BB2Ins);
+#endif
       block_trace.push_back(b);
       is_first[*tid_ptr] = make_pair(0, 0);
     } else if (event_label == MemsetEventLabel) {
@@ -161,7 +172,9 @@ void MergeTrace(char *trace_file_name, set<uint64_t> &impactful_fun_call,
       b.Addr.push_back(*addr_ptr);
       b.Addr.push_back(*addr_ptr + *length_ptr);
 
-      // b.Print(Ins, BB2Ins);
+#ifdef SLIMMER_PRINT_BLOCKS
+      b.Print(Ins, BB2Ins);
+#endif
       block_trace.push_back(b);
       is_first[*tid_ptr] = make_pair(0, 0);
     } else if (event_label == MemmoveEventLabel) {
@@ -177,7 +190,9 @@ void MergeTrace(char *trace_file_name, set<uint64_t> &impactful_fun_call,
       b.Addr.push_back(*addr2_ptr);
       b.Addr.push_back(*addr2_ptr + *length_ptr);
 
-      // b.Print(Ins, BB2Ins);
+#ifdef SLIMMER_PRINT_BLOCKS
+      b.Print(Ins, BB2Ins);
+#endif
       block_trace.push_back(b);
       is_first[*tid_ptr] = make_pair(0, 0);
     }
@@ -237,7 +252,9 @@ void MergeTrace(char *trace_file_name, set<uint64_t> &impactful_fun_call,
           }
         }
         is_first[*tid_ptr] = make_pair((uint8_t)0, (uint32_t)0);
-        // b.Print(Ins, BB2Ins);
+#ifdef SLIMMER_PRINT_BLOCKS
+        b.Print(Ins, BB2Ins);
+#endif
         block_trace.push_back(b);
       }
       if (!last_bb)
@@ -266,7 +283,9 @@ void MergeTrace(char *trace_file_name, set<uint64_t> &impactful_fun_call,
         else
           b.Caller = (uint32_t) - 1;
       }
-      // b.Print(Ins, BB2Ins);
+#ifdef SLIMMER_PRINT_BLOCKS
+      b.Print(Ins, BB2Ins);
+#endif
       block_trace.push_back(b);
     }
   }

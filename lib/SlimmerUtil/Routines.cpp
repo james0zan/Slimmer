@@ -101,7 +101,8 @@ void LoadInstInfo(string path, vector<InstInfo> &info,
     if (ins.File != "[UNKNOWN]")
       ins.File = base64_decode(ins.File);
     file >> ins.Code;
-    ins.Code = base64_decode(ins.Code);
+    if (ins.Code != "[UNKNOWN]")
+      ins.Code = base64_decode(ins.Code);
 
     // printf("%d:\n\t%d\n\t%d\n\t%d\n\t%s\n\t%s\n", ins.ID, ins.BB,
     // ins.IsPointer, ins.LoC, ins.File.c_str(), ins.Code.c_str());

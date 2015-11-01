@@ -217,6 +217,7 @@ void GroupMemory(vector<SmallestBlock> &block_trace) {
   for (int i = block_trace.size() - 1; i >= 0; --i) {
     SmallestBlock b = block_trace[i];
     // b.Print(Ins, BB2Ins);
+    shoud_merge.clear();
 
     if (b.Type == SmallestBlock::MemoryAccessBlock ||
         b.Type == SmallestBlock::MemsetBlock ||
@@ -224,7 +225,6 @@ void GroupMemory(vector<SmallestBlock> &block_trace) {
       if (b.Addr[0] >= b.Addr[1])
         continue; // Inefficacious write
 
-      shoud_merge.clear();
       auto ins = I(b.TID, BB2Ins[b.BBID][b.Start]);
 
       // All the addresses of [Addr[0], Addr[1]) should belong to the same group

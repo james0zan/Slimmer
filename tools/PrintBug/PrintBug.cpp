@@ -85,7 +85,9 @@ void PreparePostDominator(string bbgraph_file_name,
       if (i.second.size() > 0)
         res = post_dominator[i.first];
       for (auto j : i.second) {
-        SetIntersection(res, post_dominator[j]);
+        auto tmp = post_dominator[j];
+        tmp.insert(j);
+        SetIntersection(res, tmp);
       }
       // if (i.second.size() == 1) res.insert(i.second[0]); // TODO
 
@@ -116,16 +118,28 @@ void OneInstruction(DynamicInst dyn_ins, int32_t last_bb_id,
   needed.erase(I(dyn_ins.TID, dyn_ins.ID));
   mem_depended.erase(dyn_ins);
 
+#ifdef SLIMMER_PRINT_DEP
+  printf("The last %d-th execution of\n  instruction %d, %s\n  from thread %lu is depended on:\n",
+    dyn_ins.Cnt, dyn_ins.ID, Ins[dyn_ins.ID].Code.c_str(), dyn_ins.TID);
+#endif
   // SSA dependencies
   for (auto dep : Ins[dyn_ins.ID].SSADependencies) {
     if (dep.first == InstInfo::Inst) {
       needed.insert(I(dyn_ins.TID, dep.second));
+#ifdef SLIMMER_PRINT_DEP
+      printf("  * the last execution of\n\tinstruction %d, %s\n\tfrom thread %lu\n",
+        dep.second, Ins[dep.second].Code.c_str(), dyn_ins.TID);
+#endif
     }
   }
 
   // Memory dependencies
   for (auto dep : MemDependencies[dyn_ins]) {
     mem_depended.insert(dep);
+#ifdef SLIMMER_PRINT_DEP
+    printf("  * the last %d-th execution of\n\tinstruction %d, %s\n\tfrom thread %lu\n",
+      dep.Cnt, dep.ID, Ins[dep.ID].Code.c_str(), dep.TID);
+#endif
   }
 
   // Phi dependencies
@@ -133,6 +147,10 @@ void OneInstruction(DynamicInst dyn_ins, int32_t last_bb_id,
     if ((int32_t)get<0>(phi_dep) == last_bb_id) {
       if (get<1>(phi_dep) == InstInfo::Inst) {
         needed.insert(I(dyn_ins.TID, get<2>(phi_dep)));
+#ifdef SLIMMER_PRINT_DEP
+        printf("  * the last execution of\n\tinstruction %d, %s\n\tfrom thread %lu\n",
+          get<2>(phi_dep), Ins[get<2>(phi_dep)].Code.c_str(), dyn_ins.TID);
+#endif
       }
       break;
     }
@@ -193,6 +211,9 @@ void ExtractUneededOperation(vector<SmallestBlock> &block_trace,
   unneeded_di.clear();
   for (int64_t i = block_trace.size() - 1; i >= 0; --i) {
     SmallestBlock b = block_trace[i];
+
+    if (b.Type == SmallestBlock::DeclareBlock) continue;
+    // b.Print(Ins, BB2Ins);
 
     if (b.IsLast > 0) {
       fun_used[b.TID].push(false);
@@ -289,8 +310,13 @@ void ExtractUneededOperation(vector<SmallestBlock> &block_trace,
           // Only one successor
           if (Ins[dyn_ins.ID].Type == InstInfo::TerminatorInst &&
               Ins[dyn_ins.ID].Successors.size() <= 1) {
-          } else
+          } else {
             unneeded_di.insert(dyn_ins);
+#ifdef SLIMMER_PRINT_DEP
+            printf("!!!The last %d-th execution of\n  instruction %d, %s\n  from thread %lu is uneeded.\n",
+              dyn_ins.Cnt, dyn_ins.ID, Ins[dyn_ins.ID].Code.c_str(), dyn_ins.TID);
+#endif
+          }
         }
         inst_count[I(dyn_ins.TID, dyn_ins.ID)]++;
         fun_used[b.TID].top() |= is_needed;

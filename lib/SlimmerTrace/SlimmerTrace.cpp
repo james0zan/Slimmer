@@ -15,14 +15,16 @@
 #include <map>
 using namespace llvm;
 
+#define SLIMMER_PRINT_CODE
+
 LogLevel _log_level = DEBUG;
 static cl::opt<std::string> TraceFilename("trace-file",
                                           cl::desc("Name of the trace file"),
-                                          cl::init("SlimmerTrace"));
+                                          cl::init("/scratch1/zhangmx/SlimmerTrace"));
 static cl::opt<std::string> InfoDir(
     "slimmer-info-dir",
     cl::desc("The directory that reserves all the generated code infomation"),
-    cl::init("Slimmer"));
+    cl::init("/scratch1/zhangmx/SlimmerInfo"));
 
 namespace {
 struct SlimmerTrace : public ModulePass {
@@ -150,11 +152,14 @@ std::string SlimmerTrace::CommonInfo(Instruction *ins) {
   }
 
   // The instruction's LLVM IR
-  rso << "\t" << "==\n";
-  // std::string ins_string = value2String(ins);
+#ifdef SLIMMER_PRINT_CODE
+  std::string ins_string = value2String(ins);
   // rso << "\t" << ins_string << "\n"; // TODO: remove this line
-  // rso << "\t" << base64_encode((unsigned char const *)ins_string.c_str(),
-  //                              ins_string.length()) << "\n";
+  rso << "\t" << base64_encode((unsigned char const *)ins_string.c_str(),
+                               ins_string.length()) << "\n";
+#else
+  rso << "\t" << "[UNKNOWN]\n";
+#endif
 
   // SSA dependencies
   int op_cnt = 0;

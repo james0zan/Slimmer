@@ -189,14 +189,14 @@ VOID ImageLoad(IMG img, VOID *v) {
 
 /// Flush the trace buffer.
 ///
-VOID Fini(INT32 code, VOID *p) { PINDEBUG("[PIN] Fini\n"); pin_event_buffer.CloseBufferFile(); }
+VOID Fini(INT32 code, VOID *p) { printf("[PIN] Fini\n"); pin_event_buffer.CloseBufferFile(); }
 
 static void cleanup_only_tracing(int signum) {
-  PINDEBUG("[PIN] cleanup_only_tracing\n");
+  printf("[PIN] cleanup_only_tracing\n");
   exit(signum);
 }
 static void finish() {
-  PINDEBUG("[PIN] finish\n");
+  printf("[PIN] finish\n");
   pin_event_buffer.CloseBufferFile();
 }
 

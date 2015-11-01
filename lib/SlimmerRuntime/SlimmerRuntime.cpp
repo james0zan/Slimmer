@@ -169,6 +169,7 @@ void CircularBuffer::CloseBufferFile() {
   dump_thread->join();
 
   fclose(stream);
+  printf("[SLIMMER] Closed\n");
   inited = false;
   append_lock.clear(std::memory_order_release);
   for (int i = 0; i < COMPRESS_BLOCK_CNT; ++i) {
@@ -237,7 +238,7 @@ static uint64_t __thread local_tid = 0;
 /// A helper function which is registered at atexit()
 ///
 static void finish() {
-  DEBUG("[SLIMMER] Finish!!!!\n");
+  printf("[SLIMMER] Finish!!!!\n");
   // Make sure that we flush the entry/value buffer on exit.
   event_buffer.CloseBufferFile();
 }
@@ -247,7 +248,7 @@ static void finish() {
 /// \param signum - the signal number.
 ///
 static void cleanup_only_tracing(int signum) {
-  DEBUG("[SLIMMER] Abnormal termination, signal number %d\n", signum);
+  printf("[SLIMMER] Abnormal termination, signal number %d\n", signum);
   exit(signum);
 }
 
