@@ -144,7 +144,7 @@ VOID SyscallEntry(THREADID t, CONTEXT *ctxt, SYSCALL_STANDARD std, VOID *v) {
     return;
   }
 
-  PINDEBUG("SysCall: %lu %d\n", tid, syscall_num);
+  PINDEBUG("SysCall: %lu\n", tid);
   syscall_event[0] = syscall_event[65] = SyscallEventLabel;
   (*(uint64_t *)(syscall_event + 1)) = tid;
   pin_event_buffer.Append(syscall_event, 66);
@@ -189,7 +189,16 @@ VOID ImageLoad(IMG img, VOID *v) {
 
 /// Flush the trace buffer.
 ///
-VOID Fini(INT32 code, VOID *p) { pin_event_buffer.CloseBufferFile(); }
+VOID Fini(INT32 code, VOID *p) { PINDEBUG("[PIN] Fini\n"); pin_event_buffer.CloseBufferFile(); }
+
+static void cleanup_only_tracing(int signum) {
+  PINDEBUG("[PIN] cleanup_only_tracing\n");
+  exit(signum);
+}
+static void finish() {
+  PINDEBUG("[PIN] finish\n");
+  pin_event_buffer.CloseBufferFile();
+}
 
 int main(int argc, char *argv[]) {
   PIN_InitSymbols();
@@ -201,6 +210,17 @@ int main(int argc, char *argv[]) {
   IMG_AddInstrumentFunction(ImageLoad, 0);
   PIN_AddSyscallEntryFunction(SyscallEntry, 0);
   PIN_AddFiniFunction(Fini, 0);
+
+  atexit(finish);
+  signal(SIGINT, cleanup_only_tracing);
+  signal(SIGQUIT, cleanup_only_tracing);
+  signal(SIGSEGV, cleanup_only_tracing);
+  signal(SIGABRT, cleanup_only_tracing);
+  signal(SIGTERM, cleanup_only_tracing);
+  signal(SIGKILL, cleanup_only_tracing);
+  signal(SIGILL, cleanup_only_tracing);
+  signal(SIGFPE, cleanup_only_tracing);
+
   PIN_StartProgram();
   return 0;
 }

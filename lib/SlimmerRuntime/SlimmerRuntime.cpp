@@ -135,10 +135,12 @@ void CircularBuffer::Init(const char *name) {
   dump_thread = new std::thread(DumpCompressed, this);
   compress_thread = new std::thread(CompressTrace, this);
 
-  stream = fopen(name, "wb");
+  
+  srand(clock());
+  std::string trace_path = name + ("_" + std::to_string(rand()));
+  stream = fopen(trace_path.c_str(), "wb");
   assert(stream && "Failed to open tracing file!\n");
-
-  DEBUG("[SLIMMER] Opened trace file: %s\n", name);
+  printf("[SLIMMER] Opened trace file: %s\n", trace_path.c_str());
 
   // Initialize all of the other fields.
   cur_block = offset = 0;
@@ -214,7 +216,6 @@ inline void CircularBuffer::EndAppend() {
 inline void CircularBuffer::Dump(const char *start, uint64_t length) {
   fwrite(&length, sizeof(length), 1, stream);
   uint64_t cur = 0;
-  ;
   while (cur < length) {
     size_t tmp = fwrite(start + cur, 1, length - cur, stream);
     if (tmp > 0)
@@ -236,6 +237,7 @@ static uint64_t __thread local_tid = 0;
 /// A helper function which is registered at atexit()
 ///
 static void finish() {
+  DEBUG("[SLIMMER] Finish!!!!\n");
   // Make sure that we flush the entry/value buffer on exit.
   event_buffer.CloseBufferFile();
 }
@@ -259,7 +261,7 @@ void recordInit(const char *name) {
   event_buffer.Init(name);
 
   // Register the signal handlers for flushing the tracing data to file
-  // atexit(finish); // TODO: error: undefined reference to 'atexit'
+  atexit(finish);
   signal(SIGINT, cleanup_only_tracing);
   signal(SIGQUIT, cleanup_only_tracing);
   signal(SIGSEGV, cleanup_only_tracing);

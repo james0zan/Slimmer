@@ -150,10 +150,11 @@ std::string SlimmerTrace::CommonInfo(Instruction *ins) {
   }
 
   // The instruction's LLVM IR
-  std::string ins_string = value2String(ins);
-  // rso << "\t" << ins_string << ",\n"; // TODO: remove this line
-  rso << "\t" << base64_encode((unsigned char const *)ins_string.c_str(),
-                               ins_string.length()) << "\n";
+  rso << "\t" << "==\n";
+  // std::string ins_string = value2String(ins);
+  // rso << "\t" << ins_string << "\n"; // TODO: remove this line
+  // rso << "\t" << base64_encode((unsigned char const *)ins_string.c_str(),
+  //                              ins_string.length()) << "\n";
 
   // SSA dependencies
   int op_cnt = 0;
@@ -545,7 +546,7 @@ void SlimmerTrace::instrumentStoreInst(StoreInst *store_ptr) {
   Value *store_size = ConstantInt::get(Int64Type, size);
 
   auto type = store_ptr->getOperand(0)->getType();
-  if (type->isSingleValueType() && !type->isVectorTy() && size <= 64) {
+  if (type->isSingleValueType() && !type->isVectorTy() && size <= 8) {
     // Cast the pointer into a void pointer type.
     Value *value = store_ptr->getValueOperand();
     value = LLVMCastTo(value, Int64Type, value->getName(), store_ptr);

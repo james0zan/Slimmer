@@ -46,9 +46,43 @@ void MergeTrace(char *trace_file_name, set<uint64_t> &impactful_fun_call,
   while (iter.NextEvent(event_label, tid_ptr, id_ptr, addr_ptr, length_ptr,
                         addr2_ptr)) {
 
+    // switch (event_label) {
+    //   case BasicBlockEventLabel:
+    //     printf("BasicBlockEvent:  %lu\t%u\n", *tid_ptr, *id_ptr);
+    //     break;
+    //   case MemoryEventLabel:
+    //     printf("MemoryEvent:      %lu\t%u\t%p\t%lu\n", *tid_ptr, *id_ptr,
+    // (void*)*addr_ptr, *length_ptr);
+    //     break;
+    //   case ReturnEventLabel:
+    //     printf("ReturnEvent:      %lu\t%u\t%p\n", *tid_ptr, *id_ptr,
+    // (void*)*addr_ptr);
+    //     break;
+    //   case ArgumentEventLabel:
+    //     printf("ArgumentEvent:    %lu\t%p\n", *tid_ptr, (void*)*addr_ptr);
+    //     break;
+    //   case  MemsetEventLabel:
+    //     printf("MemsetEvent:      %lu\t%u\t%p\t%lu\n", *tid_ptr, *id_ptr,
+    // (void*)*addr_ptr, *length_ptr);
+    //     break;
+    //   case  MemmoveEventLabel:
+    //     printf("MemmoveEvent:     %lu\t%u\t%p\t%p\t%lu\n", *tid_ptr, *id_ptr,
+    // (void*)*addr_ptr, (void*)*addr2_ptr, *length_ptr);
+    //     break;
+    // }
+
     // Collecting the arguments of a function call event
     if (event_label == ArgumentEventLabel) {
       args[*tid_ptr].insert(*addr_ptr);
+      continue;
+    }
+    if (event_label == MemoryEventLabel && (*id_ptr == (uint32_t) - 1) && (*tid_ptr == 0) ) {
+      SmallestBlock b;
+      b.Type = SmallestBlock::DeclareBlock;
+      b.Addr.push_back(*addr_ptr);
+      b.Addr.push_back(*addr_ptr + *length_ptr);
+      // b.Print(Ins, BB2Ins);
+      block_trace.push_back(b);
       continue;
     }
 

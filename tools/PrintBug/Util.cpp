@@ -91,7 +91,6 @@ bool TraceIter::Prepare() {
                                        length, COMPRESS_BLOCK_SIZE);
     assert(decoded_size > 0);
     decoded_iter = 0;
-
     data_iter += length + sizeof(uint64_t);
   }
   return true;
