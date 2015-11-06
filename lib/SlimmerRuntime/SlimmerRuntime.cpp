@@ -5,6 +5,8 @@
 #include <semaphore.h>
 #include <thread>
 #include <vector>
+#include <chrono>
+#include <sys/fcntl.h>
 
 //===----------------------------------------------------------------------===//
 //                        Semaphore
@@ -68,7 +70,7 @@ public:
 
 private:
   std::atomic_bool inited;
-  FILE *stream;
+  char *trace_path_ptr;
 
   int cur_block; // The block ID that is currently writed
   size_t offset;
@@ -135,12 +137,17 @@ void CircularBuffer::Init(const char *name) {
   dump_thread = new std::thread(DumpCompressed, this);
   compress_thread = new std::thread(CompressTrace, this);
 
+  typedef std::chrono::high_resolution_clock Clock;
+  srand(Clock::now().time_since_epoch().count());
   
-  srand(clock());
-  std::string trace_path = name + ("_" + std::to_string(rand()));
-  stream = fopen(trace_path.c_str(), "wb");
+  std::string trace_path = name + ("_" + std::to_string(rand())) + ("_" + std::to_string(getpid()));
+  trace_path_ptr = new char[trace_path.length() + 1];
+  strcpy(trace_path_ptr, trace_path.c_str());
+  
+  FILE *stream = fopen(trace_path_ptr, "wb");
   assert(stream && "Failed to open tracing file!\n");
-  printf("[SLIMMER] Opened trace file: %s\n", trace_path.c_str());
+  fclose(stream);
+  printf("[SLIMMER] Opened trace file: %s\n", trace_path_ptr);
 
   // Initialize all of the other fields.
   cur_block = offset = 0;
@@ -153,10 +160,11 @@ void CircularBuffer::Init(const char *name) {
 /// and then close the file.
 ///
 void CircularBuffer::CloseBufferFile() {
+  printf("[SLIMMER::CloseBufferFile] inited = %d pid=%d\n", inited.load(), getpid());
   if (!inited)
     return;
 
-  DEBUG("[SLIMMER] Writing buffered data to trace file and closing.\n");
+  printf("[SLIMMER] Writing buffered data to trace file and closing.\n");
 
   *StartAppend(1) = EndEventLabel;
   memset(buffer[cur_block] + offset, PlaceHolderLabel, size - offset);
@@ -168,7 +176,6 @@ void CircularBuffer::CloseBufferFile() {
   compress_thread->join();
   dump_thread->join();
 
-  fclose(stream);
   printf("[SLIMMER] Closed\n");
   inited = false;
   append_lock.clear(std::memory_order_release);
@@ -215,6 +222,11 @@ inline void CircularBuffer::EndAppend() {
 /// \param length - the length of the log.
 ///
 inline void CircularBuffer::Dump(const char *start, uint64_t length) {
+  DEBUG("[SLIMMER::Dump] len = %lu pid=%d\n", length, getpid());
+
+  FILE *stream = fopen(trace_path_ptr, "ab");
+  assert(stream && "Failed to open tracing file!\n");
+
   fwrite(&length, sizeof(length), 1, stream);
   uint64_t cur = 0;
   while (cur < length) {
@@ -223,6 +235,8 @@ inline void CircularBuffer::Dump(const char *start, uint64_t length) {
       cur += tmp;
   }
   fwrite(&length, sizeof(length), 1, stream);
+
+  fclose(stream);
 }
 
 //===----------------------------------------------------------------------===//
@@ -282,7 +296,7 @@ __attribute__((always_inline)) void recordBasicBlockEvent(uint32_t id) {
     // The first event of a thread will always be a BasicBlockEvent
     local_tid = syscall(SYS_gettid);
   }
-  DEBUG("[BasicBlockEvent] id = %u\n", id);
+  DEBUG("[BasicBlockEvent] id = %u pid=%d\n", id, getpid());
 
   char *buffer = event_buffer.StartAppend(SizeOfBasicBlockEvent);
 
@@ -312,7 +326,7 @@ __attribute__((always_inline)) void recordMemoryEvent(uint32_t id, void *addr,
   *(buffer + 29) = MemoryEventLabel;
 
   event_buffer.EndAppend();
-  DEBUG("[MemoryEvent] id = %u, addr = %p, len = %lu\n", id, addr, length);
+  DEBUG("[MemoryEvent] id = %u, addr = %p, len = %lu pid=%d\n", id, addr, length, getpid());
 }
 
 
@@ -328,7 +342,7 @@ __attribute__((always_inline)) void recordCallocEvent(uint32_t id, void *addr,
   *(buffer + 29) = MemoryEventLabel;
 
   event_buffer.EndAppend();
-  DEBUG("[MemoryEvent] id = %u, addr = %p, len = %lu\n", id, addr, length);
+  DEBUG("[MemoryEvent] id = %u, addr = %p, len = %lu pid=%d\n", id, addr, length, getpid());
 }
 
 /// Append a MemoryEvent for a store instruction to the trace buffer.
@@ -357,8 +371,8 @@ __attribute__((always_inline)) void recordStoreEvent(uint32_t id, void *addr,
   *(buffer + 29) = MemoryEventLabel;
 
   event_buffer.EndAppend();
-  DEBUG("[MemoryEvent] id = %u, addr = %p, len = %lu, value = %lu\n", id, addr,
-        length, value);
+  DEBUG("[MemoryEvent] id = %u, addr = %p, len = %lu, value = %lu pid=%d\n", id, addr,
+        length, value, getpid());
 }
 
 /// Append a ReturnEvent to the trace buffer.
@@ -367,8 +381,8 @@ __attribute__((always_inline)) void recordStoreEvent(uint32_t id, void *addr,
 /// \param fun - the address of the called function.
 ///
 __attribute__((always_inline)) void recordReturnEvent(uint32_t id, void *fun) {
-  DEBUG("[ReturnEvent] tid = %lu id = %u, fun = %p clock()=%lu\n", local_tid,
-        id, fun, (uint64_t)clock());
+  DEBUG("[ReturnEvent] tid = %lu id = %u, fun = %p clock()=%lu pid=%d\n", local_tid,
+        id, fun, (uint64_t)clock(), getpid());
 
   char *buffer = event_buffer.StartAppend(SizeOfReturnEvent);
 
@@ -386,7 +400,7 @@ __attribute__((always_inline)) void recordReturnEvent(uint32_t id, void *fun) {
 /// \param arg - the pointer argument.
 ///
 __attribute__((always_inline)) void recordArgumentEvent(void *arg) {
-  DEBUG("[ArgumentEvent] arg = %p\n", arg);
+  DEBUG("[ArgumentEvent] arg = %p pid=%d\n", arg, getpid());
 
   char *buffer = event_buffer.StartAppend(SizeOfArgumentEvent);
 
@@ -408,8 +422,8 @@ __attribute__((always_inline)) void recordArgumentEvent(void *arg) {
 __attribute__((always_inline)) void recordMemset(uint32_t id, void *addr,
                                                  uint64_t length,
                                                  uint8_t value) {
-  DEBUG("[MemsetEvent] id = %u, addr = %p, len = %lu, value = %u\n", id, addr,
-        length, value);
+  DEBUG("[MemsetEvent] id = %u, addr = %p, len = %lu, value = %u pid=%d\n", id, addr,
+        length, value, getpid());
 
   char *buffer = event_buffer.StartAppend(SizeOfMemsetEvent);
   // If it writes the same value as the original one,
@@ -445,8 +459,8 @@ __attribute__((always_inline)) void recordMemset(uint32_t id, void *addr,
 ///
 __attribute__((always_inline)) void recordMemmove(uint32_t id, void *dest,
                                                   void *src, uint64_t length) {
-  DEBUG("[MemmoveEvent] id = %u, dest = %p, src = %p, len = %lu\n", id, dest,
-        src, length);
+  DEBUG("[MemmoveEvent] id = %u, dest = %p, src = %p, len = %lu pid=%d\n", id, dest,
+        src, length, getpid());
 
   char *buffer = event_buffer.StartAppend(SizeOfMemmoveEvent);
   // If it writes the same value as the original one,

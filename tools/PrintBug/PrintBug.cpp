@@ -162,7 +162,7 @@ void OneInstruction(DynamicInst dyn_ins, int32_t last_bb_id,
 /// \param code - the LLVM IR of the code.
 /// \return - return if it is a return void instruction.
 ///
-bool isReturnVoid(string code) {
+bool IsReturnVoid(std::string code) {
   size_t i = 0;
   while (i < code.size() && isspace(code[i]))
     ++i;
@@ -292,7 +292,7 @@ void ExtractUneededOperation(vector<SmallestBlock> &block_trace,
           terminator_stack[b.TID].top() =
               make_tuple(b.BBID, dyn_ins, is_needed);
         } else if (Ins[dyn_ins.ID].Type == InstInfo::ReturnInst) {
-          if (isReturnVoid(Ins[dyn_ins.ID].Code))
+          if (IsReturnVoid(Ins[dyn_ins.ID].Code))
             is_needed = true;
           else {
             assert(b.IsLast == 1 || b.IsLast == 2);
@@ -435,10 +435,12 @@ void PrintBug(set<DynamicInst> &bug) {
       BFSOnUneededGraph(uneeded_graph, i.first, bug, printed);
 
       printf("\n===============\nBug %d\n===============\n", bug_cnt++);
+#ifdef SLIMMER_PRINT_CODE
       printf("\n------IR------\n");
       for (auto j : bug) {
         printf("(%4d)\t%d:\t%s\n", uneeded_ins_cnt[j], j, Ins[j].Code.c_str());
       }
+#endif
       printf("\n------Related Code------\n");
       map<string, set<int> > used_code;
       map<pair<string, int>, int> code_cnt;

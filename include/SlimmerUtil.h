@@ -26,6 +26,7 @@
 #include <string>
 #include <sstream>
 
+// #define SLIMMER_PRINT_CODE
 // #define DEBUG_SLIMMER_UTILL
 #ifdef DEBUG_SLIMMER_UTILL
 #define DEBUG(...) fprintf(stderr, __VA_ARGS__)

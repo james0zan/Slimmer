@@ -15,8 +15,6 @@
 #include <map>
 using namespace llvm;
 
-#define SLIMMER_PRINT_CODE
-
 LogLevel _log_level = DEBUG;
 static cl::opt<std::string> TraceFilename("trace-file",
                                           cl::desc("Name of the trace file"),
@@ -158,7 +156,14 @@ std::string SlimmerTrace::CommonInfo(Instruction *ins) {
   rso << "\t" << base64_encode((unsigned char const *)ins_string.c_str(),
                                ins_string.length()) << "\n";
 #else
-  rso << "\t" << "[UNKNOWN]\n";
+  if (ReturnInst *return_ptr = dyn_cast<ReturnInst>(ins)) {
+    if (return_ptr->getReturnValue() == NULL)
+      rso << "\t" << "cmV0IHZvaWQK" << "\n";
+    else
+      rso << "\t" << "[UNKNOWN]\n";
+  } else {
+    rso << "\t" << "[UNKNOWN]\n";
+  }
 #endif
 
   // SSA dependencies
